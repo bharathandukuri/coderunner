@@ -135,4 +135,113 @@ function splitPostgresStatements(sql) {
   return statements;
 }
 
-module.exports = { splitPostgresStatements };
+/**
+ * Strips comments and string literals from SQL, leaving bare SQL keywords/tokens.
+ * Used for safe inspection of statements (e.g. checking whether a WITH statement
+ * contains INSERT, UPDATE, DELETE, MERGE).
+ */
+function stripCommentsAndLiterals(sql) {
+  if (!sql) return '';
+  let out = '';
+  let i = 0;
+  const len = sql.length;
+
+  while (i < len) {
+    const ch = sql[i];
+    const nextCh = i + 1 < len ? sql[i + 1] : '';
+
+    // Line comment: -- to newline
+    if (ch === '-' && nextCh === '-') {
+      let end = sql.indexOf('\n', i + 2);
+      if (end === -1) end = len;
+      out += ' ';
+      i = end;
+      continue;
+    }
+
+    // Block comment: /* ... */
+    if (ch === '/' && nextCh === '*') {
+      let depth = 1;
+      i += 2;
+      while (i < len && depth > 0) {
+        if (sql[i] === '/' && sql[i + 1] === '*') {
+          depth++;
+          i += 2;
+        } else if (sql[i] === '*' && sql[i + 1] === '/') {
+          depth--;
+          i += 2;
+        } else {
+          i++;
+        }
+      }
+      out += ' ';
+      continue;
+    }
+
+    // Dollar quoting
+    if (ch === '$') {
+      const match = sql.slice(i).match(/^\$([a-zA-Z0-9_]*)\$/);
+      if (match) {
+        const tag = match[0];
+        const closeIdx = sql.indexOf(tag, i + tag.length);
+        if (closeIdx !== -1) {
+          out += ' ';
+          i = closeIdx + tag.length;
+          continue;
+        }
+      }
+    }
+
+    // Single-quoted strings (including E'...')
+    const isEscapeString = (ch === 'E' || ch === 'e') && nextCh === "'";
+    if (ch === "'" || isEscapeString) {
+      if (isEscapeString) {
+        i += 2;
+      } else {
+        i += 1;
+      }
+      while (i < len) {
+        if (isEscapeString && sql[i] === '\\' && i + 1 < len) {
+          i += 2;
+        } else if (sql[i] === "'") {
+          if (sql[i + 1] === "'") {
+            i += 2;
+          } else {
+            i += 1;
+            break;
+          }
+        } else {
+          i++;
+        }
+      }
+      out += ' ';
+      continue;
+    }
+
+    // Double-quoted identifiers: preserve identifier or replace with space
+    if (ch === '"') {
+      i++;
+      while (i < len) {
+        if (sql[i] === '"') {
+          if (sql[i + 1] === '"') {
+            i += 2;
+          } else {
+            i++;
+            break;
+          }
+        } else {
+          i++;
+        }
+      }
+      out += ' ';
+      continue;
+    }
+
+    out += ch;
+    i++;
+  }
+
+  return out;
+}
+
+module.exports = { splitPostgresStatements, stripCommentsAndLiterals };

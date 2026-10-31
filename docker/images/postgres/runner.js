@@ -1,12 +1,12 @@
 const pg = require('pg');
 const fs = require('fs');
-const { splitPostgresStatements } = require('./splitter.js');
+const { splitPostgresStatements, stripCommentsAndLiterals } = require('./splitter.js');
 
 let Cursor = null;
 try {
   Cursor = require('pg-cursor');
-} catch {
-  // Cursor will be available in container image with pg-cursor installed
+} catch (err) {
+  process.stderr.write(`[WARN] pg-cursor not installed, falling back to buffered query execution: ${err.message}\n`);
 }
 
 const { Client } = pg;
@@ -110,23 +110,35 @@ async function executeWithCursor(client, stmt) {
 }
 
 /**
+ * Determines whether a statement can return rows and cannot modify data.
+ * Safe for cursor execution without side-effects:
+ * - Starts with SELECT, VALUES or TABLE
+ * - Starts with WITH and contains none of INSERT, UPDATE, DELETE, MERGE outside quoted strings/comments
+ */
+function isCursorEligible(stmt) {
+  const stripped = stripCommentsAndLiterals(stmt).trim();
+  if (/^\s*(SELECT|VALUES|TABLE)\b/i.test(stripped)) {
+    return true;
+  }
+  if (/^\s*WITH\b/i.test(stripped)) {
+    // If it's a CTE, ensure it has no data-modifying statements (INSERT, UPDATE, DELETE, MERGE)
+    if (!/\b(INSERT|UPDATE|DELETE|MERGE)\b/i.test(stripped)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Execute a single statement and return its formatted text output
  */
 async function executeSingleStatement(client, stmt) {
-  const trimmed = stmt.trim();
-  const isSelectLike = /^\s*(SELECT|WITH|TABLE|VALUES)\b/i.test(trimmed);
-  // Infinite recursive CTEs without WHERE/LIMIT should be executed directly so PostgreSQL's
-  // statement_timeout fires and enforces TLE (exit 124) instead of early 1MB cursor cap.
-  const isInfiniteRecursive = /WITH\s+RECURSIVE\b/i.test(trimmed) && !/\b(WHERE|LIMIT)\b/i.test(trimmed);
-
-  if (Cursor && isSelectLike && !isInfiniteRecursive) {
-    try {
-      return await executeWithCursor(client, stmt);
-    } catch (cursorErr) {
-      // If cursor fails for any syntax reason, fall back to standard query
-    }
+  if (Cursor && isCursorEligible(stmt)) {
+    // Use cursor path; rethrow all errors (including statement_timeout 57014 and syntax errors)
+    return await executeWithCursor(client, stmt);
   }
 
+  // Fallback buffered path: for statements that modify data or if Cursor is not available
   const res = await client.query({ text: stmt, rowMode: 'array' });
   const results = Array.isArray(res) ? res : [res];
   let out = '';

@@ -8,9 +8,10 @@ RUN adduser -D -u 1001 -s /bin/bash runner
 
 # Prepare runner directory and install pg driver and pg-cursor for batch streaming (D5)
 WORKDIR /opt/runner
+COPY package.json /opt/runner/package.json
+RUN npm install --omit=dev && chmod -R 755 /opt/runner
 COPY runner.js /opt/runner/runner.js
 COPY splitter.js /opt/runner/splitter.js
-RUN npm init -y && npm install pg pg-cursor --production && chmod -R 755 /opt/runner
 
 # Initialize template database cluster under postgres (UID 70)
 RUN mkdir -p /var/lib/postgresql/template && \

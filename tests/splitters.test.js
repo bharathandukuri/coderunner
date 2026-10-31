@@ -123,4 +123,42 @@ describe('SQL Statement Splitter Unit Tests (Section D)', () => {
       assert(stmts[2].includes('SELECT 3'));
     });
   });
+
+  describe('PostgreSQL stripCommentsAndLiterals & Cursor Eligibility (Section 2)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { stripCommentsAndLiterals } = require('../docker/images/postgres/splitter.js');
+
+    it('strips strings, dollar quotes, and comments to reveal underlying SQL commands', () => {
+      const sql = `
+        /* comment with INSERT */
+        -- line comment with DELETE
+        WITH ins AS (
+          INSERT INTO t VALUES (1) RETURNING *
+        )
+        SELECT 'UPDATE foo', "MERGE bar", $$DELETE baz$$ FROM ins;
+      `;
+      const stripped = stripCommentsAndLiterals(sql);
+      assert(!stripped.includes('/* comment with INSERT */'));
+      assert(!stripped.includes('UPDATE foo'));
+      assert(!stripped.includes('DELETE baz'));
+      // The actual DML 'INSERT' in the CTE body is preserved so cursor check knows it mutates data
+      assert(/\bINSERT\b/i.test(stripped));
+    });
+
+    it('identifies pure read-only queries as cursor eligible', () => {
+      const pureSelect = 'SELECT * FROM users WHERE active = true';
+      const stripped = stripCommentsAndLiterals(pureSelect);
+      const isEligible = /^\s*(SELECT|VALUES|TABLE)\b/i.test(stripped) ||
+        (/^\s*WITH\b/i.test(stripped) && !/\b(INSERT|UPDATE|DELETE|MERGE)\b/i.test(stripped));
+      assert.strictEqual(isEligible, true);
+    });
+
+    it('disallows data-modifying CTEs from cursor execution', () => {
+      const dmlCte = 'WITH ins AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM ins';
+      const stripped = stripCommentsAndLiterals(dmlCte);
+      const isEligible = /^\s*(SELECT|VALUES|TABLE)\b/i.test(stripped) ||
+        (/^\s*WITH\b/i.test(stripped) && !/\b(INSERT|UPDATE|DELETE|MERGE)\b/i.test(stripped));
+      assert.strictEqual(isEligible, false);
+    });
+  });
 });

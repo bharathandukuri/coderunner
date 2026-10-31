@@ -646,6 +646,56 @@ describe('CodeRunner API', () => {
       assert(data.status.id !== 3);
     });
 
+    it('should report syntax error once without second execution', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: "CREATE TEMP TABLE side_effects (n INT); INSERT INTO side_effects VALUES (1); SELECT FROM WHERE; SELECT COUNT(*) FROM side_effects;",
+          language_id: 8,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 11); // NZEC
+      assert(data.stderr && data.stderr.includes('syntax error'));
+      // Stderr has only 1 error report, not duplicated
+      const errorCount = (data.stderr.match(/syntax error/gi) || []).length;
+      assert.strictEqual(errorCount, 1);
+    });
+
+    it('should execute data-modifying CTE exactly once when followed by failing statement', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: "CREATE TEMP TABLE t (id INT); WITH ins AS (INSERT INTO t VALUES (1) RETURNING *) SELECT * FROM ins; SELECT syntax_error_here FROM;",
+          language_id: 8,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 11);
+      assert(data.stdout && data.stdout.includes('1'));
+      assert(data.stderr && data.stderr.includes('syntax error'));
+    });
+
+    it('should stream 5,000,000-row SELECT and return capped output without OOM', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: "SELECT generate_series(1, 5000000);",
+          language_id: 8,
+          time_limit: 10,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 3);
+      assert(data.stdout && data.stdout.includes('[Output limit of 1MB exceeded]'));
+    });
+
     it('should handle 20-request burst on PostgreSQL (Language ID: 8)', async () => {
       const burst = Array.from({ length: 20 }, (_, i) =>
         fetch(`${BASE_URL}/submissions?wait=true`, {

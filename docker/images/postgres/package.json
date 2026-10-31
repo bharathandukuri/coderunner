@@ -2,6 +2,10 @@
   "name": "postgres-runner",
   "version": "1.0.0",
   "private": true,
-  "type": "commonjs"
+  "type": "commonjs",
+  "dependencies": {
+    "pg": "^8.13.1",
+    "pg-cursor": "^2.12.1"
+  }
 }
 
