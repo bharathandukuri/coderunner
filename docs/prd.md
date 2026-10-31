@@ -79,3 +79,20 @@ Deliver a secure, low-latency code execution engine capable of executing arbitra
 - `10`: Runtime Error (SIGABRT)
 - `11`: Runtime Error (NZEC - Non-zero exit code)
 - `13`: Internal Error
+
+---
+
+## Security & Sandbox Boundaries
+
+### 1. Isolate Worker
+- Runs with `privileged: true` and `cgroup: host` by design to manage cgroups v2 resource controllers (`cpu`, `memory`, `pids`).
+- Each user execution runs inside a disposable ephemeral directory sandbox (`/var/local/lib/isolate/<id>`) managed by the `isolate` binary.
+- When running in containers, `isolate` is baked into `docker/worker/Dockerfile`.
+- When running directly on bare-metal or VMs, `scripts/install-isolate.sh` installs the binary and systemd service onto the host system.
+
+### 2. Docker & Database Worker (`worker-db`)
+- Runs database submissions (`submissions-db`) using warm ephemeral containers (`coderunner/postgres:16`, `coderunner/mysql:8.4`).
+- Communicates with Docker via `docker-socket-proxy` (`v0.5.0`) over an internal network (`docker-socket-net`, `internal: true`).
+- **Proxy Boundary Note:** The proxy is a defense-in-depth barrier blocking non-container endpoints (`/volumes`, `/networks`, `/secrets`). It is not a strict multi-tenant boundary because it filters by HTTP endpoint, not request body. Strict multi-tenancy requires dedicated execution nodes.
+- **gVisor (`runsc`)**: Can be installed on the host via `scripts/install-gvisor.sh`. When `DOCKER_RUNTIME=runsc` is set in `.env`, user code inside Docker containers is evaluated by an emulated user-space kernel.
+

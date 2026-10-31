@@ -154,6 +154,26 @@ curl -X POST "http://localhost:3000/submissions?wait=true" \
 
 ---
 
+## Sandbox & Isolation Architecture
+
+CodeRunner offers two sandboxing execution models depending on the worker type:
+
+### 1. Isolate Sandbox (cgroups v2 + Linux Namespaces)
+Used for standard languages (C, C++, Java, Python, Node, TypeScript, SQLite) via the `submissions` queue in `WORKER_TYPE=isolate` mode.
+- **Where Isolate Lives:**
+  - **In Containerized Production (`docker-compose.prod.yml`)**: Built directly into the `worker` Docker image (`docker/worker/Dockerfile`) using `privileged: true` and `cgroup: host`. The worker manages isolate sandboxes inside `/var/local/lib/isolate`.
+  - **On Host (`scripts/install-isolate.sh`)**: If running workers directly on a Linux bare-metal or VM host (without Docker encapsulation), `install-isolate.sh` installs the `isolate` binary (setuid root) and starts `isolate.service` (cgroup keeper) directly on the host system.
+- **Security:** Each execution runs in a disposable directory sandbox (`/var/local/lib/isolate/<box_id>`) with its own mount namespace, PID namespace, network isolation, and precise cgroups v2 CPU, memory, and wall-time limits.
+
+### 2. Docker & Warm Container Pool Sandbox
+Used for database engines (PostgreSQL 16, MySQL 8.4) via the `submissions-db` queue in `WORKER_TYPE=db` mode, and as a fallback execution mode for languages when Isolate is unavailable:
+- **`docker/worker/Dockerfile`**: The production worker image containing Node.js, the BullMQ worker daemon, and installed compilers/runtimes for all languages.
+- **`docker/images/multi/Dockerfile` (`coderunner/multi:latest`)**: The all-in-one container image containing GCC, JDK, Python, and Node.js. Used for multi-file submissions (`POST /submissions/multi`) or single-container fallback testing when language-specific isolated containers are not pulled.
+- **gVisor Hardening (`runsc`)**: Can be installed on the host via `scripts/install-gvisor.sh`. When active, `DOCKER_RUNTIME=runsc` runs sandboxed containers with user-space kernel emulation.
+- **Docker Socket Proxy**: In production, `worker-db` does not mount `/var/run/docker.sock` directly. It connects over an isolated internal network (`docker-socket-net`) to `tecnativa/docker-socket-proxy`, which filters out dangerous API endpoints (`/volumes`, `/networks`, `/secrets`).
+
+---
+
 ## Status Codes
 
 | ID | Status Description | Notes |
