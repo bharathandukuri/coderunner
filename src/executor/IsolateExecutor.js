@@ -385,6 +385,8 @@ class IsolateExecutor {
       stderr = null;
     }
 
+    const isDatabase = submission?.language?.category === 'database' || [7, 8, 9].includes(submission?.language?.id);
+
     return {
       status,
       stdout: stdout || null,
@@ -392,7 +394,7 @@ class IsolateExecutor {
       compile_output: null,
       time: result.time != null ? result.time.toFixed(3) : null,
       wall_time: result.wallTime != null ? result.wallTime.toFixed(3) : null,
-      memory: result.memory != null ? result.memory : null,
+      memory: isDatabase ? null : (result.memory != null ? result.memory : null),
       exit_code: result.exitCode,
       exit_signal: result.exitSignal,
       message: result.message,
