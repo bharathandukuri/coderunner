@@ -817,10 +817,11 @@ export class WarmContainerPool {
    * Create an isolated on-demand container for unpooled or custom submissions (C3)
    */
   async createOnDemandContainer(languageId, submission = {}) {
-    const lang = submission.language || getLanguageById(languageId);
+    const sub = submission || {};
+    const lang = sub.language || getLanguageById(languageId);
     const containerConfig = buildContainerConfig({
       language: lang,
-      submission,
+      submission: sub,
       instanceId: this.instanceId,
       isDaemon: Boolean(lang && lang.category === 'database' && lang.is_daemon),
       isPool: false,

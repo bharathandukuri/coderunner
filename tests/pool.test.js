@@ -711,5 +711,117 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
     await pool.shutdown();
   });
+
+  it('23. Fallback logic (A6): empty pool, circuit open, queue full, limit mismatch -> on demand; DB never goes on-demand', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      enableLanguagePool: true,
+      concurrency: 1,
+      maxWaiters: 1,
+      acquireTimeoutMs: 50,
+    });
+
+    const pyPool = pool.pools[5];
+    assert(pyPool, 'Python language pool should be initialized');
+
+    // Case 1: Empty pool -> falls back to on-demand
+    assert.strictEqual(pyPool.available.length, 0);
+    const c1 = await pool.acquire(5);
+    assert(c1, 'Container should be created on demand');
+    assert.strictEqual(c1.opts.Labels['com.coderunner.on_demand'], 'true');
+    await pool.release(c1);
+
+    // Case 2: Circuit open -> falls back to on-demand
+    pyPool.circuitState = 'open';
+    pyPool.circuitOpenUntil = Date.now() + 60000;
+    const c2 = await pool.acquire(5);
+    assert.strictEqual(c2.opts.Labels['com.coderunner.on_demand'], 'true');
+    await pool.release(c2);
+    pyPool.circuitState = 'closed';
+
+    // Case 3: Queue full -> falls back to on-demand
+    pyPool.waiters.push({ resolve: () => true, reject: () => {} });
+    assert.strictEqual(pyPool.waiters.length, 1); // >= maxWaiters
+    const c3 = await pool.acquire(5);
+    assert.strictEqual(c3.opts.Labels['com.coderunner.on_demand'], 'true');
+    await pool.release(c3);
+    pyPool.waiters.length = 0;
+
+    // Case 4: Limit mismatch outside update capability -> falls back to on-demand
+    const c4 = await pool.acquire({
+      language_id: 5,
+      memory_limit: 1000000, // Exceeds default effectiveMemory 256000
+    });
+    assert.strictEqual(c4.opts.Labels['com.coderunner.on_demand'], 'true');
+    await pool.release(c4);
+
+    // Case 5: DB never goes on-demand (A6): empty pool must time out or reject, NEVER on-demand
+    const pgPool = pool.pools[8];
+    assert(pgPool, 'PostgreSQL pool should exist');
+    assert.strictEqual(pgPool.available.length, 0);
+    mockDocker.failBootTimes = 999; // Cause boots to fail so container is not replenished
+    await assert.rejects(async () => {
+      await pool.acquire(8);
+    }, /Timed out waiting for postgres container/);
+
+    await pool.shutdown();
+  });
+
+  it('24. Global concurrent boot cap (A7): starts N boots, at most WARM_POOL_MAX_CONCURRENT_BOOTS are in-flight simultaneously', async () => {
+    let currentInFlight = 0;
+    let maxObservedInFlight = 0;
+
+    const mockDocker = createMockDocker();
+    mockDocker.createContainer = async (config) => {
+      currentInFlight++;
+      maxObservedInFlight = Math.max(maxObservedInFlight, currentInFlight);
+      // Simulate asynchronous boot work
+      await new Promise(r => setTimeout(r, 25));
+      currentInFlight--;
+
+      const id = `boot-cap-container-${Date.now()}-${Math.random()}`;
+      return {
+        id,
+        Id: id,
+        opts: config,
+        running: true,
+        start: async () => {},
+        remove: async () => ({ id }),
+        inspect: async () => ({ State: { Running: true } }),
+        exec: async () => ({
+          start: (opts, cb) => {
+            const s = new MockStream();
+            setImmediate(() => { cb(null, s); setImmediate(() => s.emit('end')); });
+          },
+          inspect: async () => ({ ExitCode: 0 }),
+        }),
+      };
+    };
+
+    const maxBoots = 2;
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      enableLanguagePool: true,
+      concurrency: 3,
+      maxConcurrentBoots: maxBoots,
+    });
+
+    // Concurrently trigger 6 boots via acquireBootSlot / createAndBoot
+    const bootPromises = [
+      pool.createAndBoot(5),
+      pool.createAndBoot(5),
+      pool.createAndBoot(8),
+      pool.createAndBoot(8),
+      pool.createAndBoot(9),
+      pool.createAndBoot(9),
+    ];
+
+    const bootedContainers = await Promise.all(bootPromises);
+    assert.strictEqual(bootedContainers.length, 6);
+    assert(maxObservedInFlight <= maxBoots, `Max observed in-flight (${maxObservedInFlight}) must not exceed maxConcurrentBoots (${maxBoots})`);
+
+    await pool.shutdown();
+  });
 });
 

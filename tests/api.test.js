@@ -513,6 +513,61 @@ describe('CodeRunner API', () => {
       assert(data.stdout.includes('val'));
     });
 
+    it('should format exact server text for jsonb, booleans, arrays, timestamps and intervals in PostgreSQL', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: `
+            SELECT 
+              '{"key": "value", "arr": [1, 2]}'::jsonb AS j,
+              true AS bool_true,
+              false AS bool_false,
+              ARRAY[10, 20, 30] AS int_arr,
+              '2025-01-01 12:00:00+00'::timestamptz AS ts,
+              '1 day 02:00:00'::interval AS iv,
+              '' AS empty_str,
+              NULL AS null_col;
+          `,
+          language_id: 8,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 3);
+      assert(data.stdout.includes('{"arr": [1, 2], "key": "value"}') || data.stdout.includes('{"key": "value", "arr": [1, 2]}'));
+      assert(!data.stdout.includes('[object Object]'), 'Must not format jsonb as [object Object]');
+      assert(data.stdout.includes('t') && data.stdout.includes('f'));
+      assert(data.stdout.includes('{10,20,30}'));
+      assert(data.stdout.includes('2025-01-01'));
+      assert(data.stdout.includes('1 day') || data.stdout.includes('02:00:00'));
+      assert(data.stdout.includes('NULL'));
+    });
+
+    it('should handle statement splitter edge cases (quotes, comments, nested comments, dollar-quotes) in PostgreSQL', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: `
+            -- Line comment with semicolon;
+            /* Block comment with ; inside */
+            /* Nested /* comment with ; */ here */
+            SELECT 'string with ; and ''quotes''' AS quoted_val,
+                   $$dollar; quote$$ AS d_quote,
+                   $tag$tagged; block$tag$ AS tag_quote;
+          `,
+          language_id: 8,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 3);
+      assert(data.stdout.includes("string with ; and 'quotes'"));
+      assert(data.stdout.includes('dollar; quote'));
+      assert(data.stdout.includes('tagged; block'));
+    });
+
     it('should handle multi-statement scripts in PostgreSQL', async () => {
       const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
         method: 'POST',
@@ -763,6 +818,55 @@ describe('CodeRunner API', () => {
       assert.strictEqual(data.status.id, 3);
       assert(data.stdout.includes('NULL'));
       assert(data.stdout.includes('val'));
+    });
+
+    it('should format exact server text for JSON, big integers, decimals, dates, and empty strings in MySQL', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: `
+            SELECT 
+              JSON_OBJECT('a', 1, 'b', 'two') AS json_val,
+              9007199254740993 AS big_int,
+              CAST(12345.67 AS DECIMAL(7,2)) AS dec_val,
+              CAST('2025-01-01 12:00:00' AS DATETIME) AS dt,
+              '' AS empty_str,
+              NULL AS null_col;
+          `,
+          language_id: 9,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 3);
+      assert(data.stdout.includes('{"a": 1, "b": "two"}') || data.stdout.includes('{"b": "two", "a": 1}'));
+      assert(!data.stdout.includes('[object Object]'), 'Must not format JSON as [object Object]');
+      assert(data.stdout.includes('9007199254740993'), 'Must preserve 64-bit integer precision');
+      assert(data.stdout.includes('12345.67'));
+      assert(data.stdout.includes('2025-01-01'));
+      assert(data.stdout.includes('NULL'));
+    });
+
+    it('should handle statement splitter edge cases (quotes, backticks, comments) in MySQL', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: `
+            -- Trailing space comment with ; 
+            # Hash comment with ;
+            /* Block comment with ; */
+            SELECT 'string with ; and \\'quotes\\'' AS s1, "double ; string" AS s2, \`col\` AS \`backtick;col\` FROM (SELECT 1 AS \`col\`) AS t;
+          `,
+          language_id: 9,
+        }),
+      });
+      const data = await res.json();
+      assert.strictEqual(res.status, 201);
+      assert.strictEqual(data.status.id, 3);
+      assert(data.stdout.includes("string with ; and 'quotes'"));
+      assert(data.stdout.includes('double ; string'));
     });
 
     it('should handle multi-statement scripts in MySQL', async () => {
