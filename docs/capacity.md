@@ -8,15 +8,22 @@ Raw benchmark output is committed and available at [docs/benchmarks/benchmark.js
 
 ## Worker Sizing Formula
 
-To size a CodeRunner worker running warm database container pools (`WORKER_TYPE=db` or standalone Docker workers), use the following formula:
+To size a CodeRunner worker running warm database container pools (`WORKER_TYPE=db` or standalone Docker workers), use the following formula.
 
-$$\text{RAM} = (\text{concurrency} \times \text{Per\_Container\_RAM}) + \text{worker\_overhead} + \text{safety\_margin}$$
+Under sustained execution load, running jobs consume containers from the warm pool while the pool background worker actively replenishes them back to `targetPoolSize` (which defaults to `concurrency` per engine). Therefore, in the worst case under continuous traffic, the system holds both the **actively running containers** AND the **replenished warm idle containers** simultaneously (approximately $2 \times \text{concurrency}$ containers per engine):
+
+$$\text{RAM} = \sum_{\text{engine}} \left( 2 \times \text{concurrency} \times \text{Per\_Container\_RAM}_{\text{engine}} \right) + \text{worker\_overhead} + \text{safety\_margin}$$
+
+Or generalized for custom pool targets:
+
+$$\text{RAM} = \sum_{\text{engine}} \left( (\text{Target\_Pool\_Size}_{\text{engine}} + \text{Active\_Concurrent\_Jobs}_{\text{engine}}) \times \text{Per\_Container\_RAM}_{\text{engine}} \right) + \text{worker\_overhead} + \text{safety\_margin}$$
 
 ### Parameters
 
 | Variable | Description | Recommended Default |
 |---|---|---|
 | `concurrency` | Number of concurrent execution slots (`WORKER_CONCURRENCY`) | `4` (configured default in `src/utils/config.js`) |
+| `2 * concurrency` | Total concurrent container capacity: `concurrency` actively executing jobs + `concurrency` idle containers replenished in the pool | $2 \times 4 = 8$ containers per active engine |
 | `Per_Container_RAM` | Memory allocated per container. Database daemon containers (`PostgreSQL`, `MySQL`) have a cgroup memory limit of **512 MB** (`effectiveMemoryKb = 512000`). Empirical peak usage is ~63 MB for PostgreSQL and ~251 MB for MySQL. | **512 MB** (limit) or empirical peak (~63–251 MB) |
 | `tmpfs` mounts | In-memory filesystem mounts per container configured in `src/executor/containerConfig.js`:<br>- **Database containers (`isDaemon=true`)**: `/box` is **256 MB** (`size=256m`) + `/tmp` is **64 MB** (`size=64m`) = **320 MB** total tmpfs ceiling.<br>- **Language pool containers**: `/box` is computed from memory (`boxSize = Math.max(Math.ceil(effectiveMemoryKb / 1024), 128)` MB) + `/tmp` is **64 MB** + `/home` is **16 MB**. | **320 MB** ceiling for DB; `boxSize` + 80 MB for languages |
 | `worker_overhead` | Node.js worker runtime and BullMQ queue management | ~256 MB |
@@ -31,24 +38,26 @@ $$\text{RAM} = (\text{concurrency} \times \text{Per\_Container\_RAM}) + \text{wo
 ### Example Calculations
 
 #### Example 1: Concurrency = 4 (Default High-Throughput Worker)
-For `WORKER_TYPE=db` running both PostgreSQL (pool size=4) and MySQL (pool size=4) with default `WORKER_CONCURRENCY=4`:
+For `WORKER_TYPE=db` running both PostgreSQL and MySQL with default `WORKER_CONCURRENCY=4`:
+- Container count: $2 \times 4 = 8$ PostgreSQL containers (4 executing + 4 warm idle) and $2 \times 4 = 8$ MySQL containers (4 executing + 4 warm idle).
 - **Worst-case Limit Sizing (guaranteed OOM-safe under full tmpfs fill)**:
-  - PostgreSQL Pool (4 containers @ 512 MB): $4 \times 512\text{ MB} = 2,048\text{ MB}$
-  - MySQL Pool (4 containers @ 512 MB): $4 \times 512\text{ MB} = 2,048\text{ MB}$
+  - PostgreSQL Pool (8 containers @ 512 MB): $8 \times 512\text{ MB} = 4,096\text{ MB}$
+  - MySQL Pool (8 containers @ 512 MB): $8 \times 512\text{ MB} = 4,096\text{ MB}$
   - Worker Process Overhead: $256\text{ MB}$
   - Safety Margin: $1,024\text{ MB}$
-  - **Total Recommended RAM**: $2,048 + 2,048 + 256 + 1,024 = 5,376\text{ MB} \approx \mathbf{5.5\text{ to }6\text{ GB}}$
+  - **Total Recommended RAM**: $4,096 + 4,096 + 256 + 1,024 = 9,472\text{ MB} \approx \mathbf{9.5\text{ to }10\text{ GB}}$
 - **Empirical Peak Sizing (typical production queries)**:
-  - PostgreSQL Pool (4 containers @ ~63 MB peak): $4 \times 63\text{ MB} = 252\text{ MB}$
-  - MySQL Pool (4 containers @ ~251 MB peak): $4 \times 251\text{ MB} = 1,004\text{ MB}$
+  - PostgreSQL Pool (8 containers @ ~63 MB peak): $8 \times 63\text{ MB} = 504\text{ MB}$
+  - MySQL Pool (8 containers @ ~251 MB peak): $8 \times 251\text{ MB} = 2,008\text{ MB}$
   - Worker Process Overhead: $256\text{ MB}$
   - Safety Margin: $1,024\text{ MB}$
-  - **Total Recommended RAM**: $252 + 1,004 + 256 + 1,024 = 2,536\text{ MB} \approx \mathbf{2.5\text{ to }3\text{ GB}}$
+  - **Total Recommended RAM**: $504 + 2,008 + 256 + 1,024 = 3,792\text{ MB} \approx \mathbf{4\text{ GB}}$
 
 #### Example 2: Concurrency = 2 (Budget Database Worker)
-For `WORKER_TYPE=db` with PostgreSQL (pool size=2) and MySQL (pool size=2):
-- **Worst-case Limit Sizing**: $(2 \times 512\text{ MB}) + (2 \times 512\text{ MB}) + 256\text{ MB} + 512\text{ MB} = 2,816\text{ MB} \approx \mathbf{3\text{ GB}}$
-- **Empirical Peak Sizing**: $(2 \times 63\text{ MB}) + (2 \times 251\text{ MB}) + 256\text{ MB} + 512\text{ MB} = 126 + 502 + 256 + 512 = 1,396\text{ MB} \approx \mathbf{1.5\text{ to }2\text{ GB}}$
+For `WORKER_TYPE=db` with PostgreSQL and MySQL with `WORKER_CONCURRENCY=2`:
+- Container count: $2 \times 2 = 4$ PostgreSQL containers and $2 \times 2 = 4$ MySQL containers.
+- **Worst-case Limit Sizing**: $(4 \times 512\text{ MB}) + (4 \times 512\text{ MB}) + 256\text{ MB} + 512\text{ MB} = 2,048 + 2,048 + 256 + 512 = 4,864\text{ MB} \approx \mathbf{5\text{ GB}}$
+- **Empirical Peak Sizing**: $(4 \times 63\text{ MB}) + (4 \times 251\text{ MB}) + 256\text{ MB} + 512\text{ MB} = 252 + 1,004 + 256 + 512 = 2,024\text{ MB} \approx \mathbf{2\text{ to }2.5\text{ GB}}$
 
 ---
 
