@@ -126,6 +126,40 @@ test_unauth() {
 }
 
 # Helper to submit with wait=true and check stdout/status
+json_build_sub() {
+  local lang_id="$1" code="$2" time_limit="$3"
+  if command -v jq >/dev/null 2>&1; then
+    jq -nc --arg lid "$lang_id" --arg sc "$code" --arg tl "$time_limit" \
+      '{language_id: ($lid|tonumber), source_code: $sc, time_limit: ($tl|tonumber)}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json, sys; print(json.dumps({"language_id": int(sys.argv[1]), "source_code": sys.argv[2], "time_limit": int(sys.argv[3])}))' "$lang_id" "$code" "$time_limit"
+  elif command -v node >/dev/null 2>&1; then
+    node -e 'const [lid, sc, tl] = process.argv.slice(1); console.log(JSON.stringify({language_id: Number(lid), source_code: sc, time_limit: Number(tl)}));' "$lang_id" "$code" "$time_limit"
+  fi
+}
+
+json_get_status_id() {
+  local input="$1"
+  if command -v jq >/dev/null 2>&1; then
+    echo "$input" | jq -r '.status.id // 0'
+  elif command -v python3 >/dev/null 2>&1; then
+    echo "$input" | python3 -c 'import json, sys; data = json.load(sys.stdin); print(data.get("status", {}).get("id", 0))' 2>/dev/null || echo 0
+  elif command -v node >/dev/null 2>&1; then
+    echo "$input" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).status?.id||0)}catch{console.log(0)}})'
+  fi
+}
+
+json_get_stdout() {
+  local input="$1"
+  if command -v jq >/dev/null 2>&1; then
+    echo "$input" | jq -r '.stdout // ""'
+  elif command -v python3 >/dev/null 2>&1; then
+    echo "$input" | python3 -c 'import json, sys; data = json.load(sys.stdin); print((data.get("stdout") or "").strip())' 2>/dev/null || echo ""
+  elif command -v node >/dev/null 2>&1; then
+    echo "$input" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log((JSON.parse(d).stdout||"").trim())}catch{console.log("")}})'
+  fi
+}
+
 submit_and_verify() {
   local lang_id="$1"
   local code="$2"
@@ -134,14 +168,7 @@ submit_and_verify() {
   local time_limit="${5:-5}"
 
   local payload
-  payload=$(node -e '
-    const [langId, sourceCode, timeLimit] = process.argv.slice(1);
-    console.log(JSON.stringify({
-      language_id: Number(langId),
-      source_code: sourceCode,
-      time_limit: Number(timeLimit)
-    }));
-  ' "$lang_id" "$code" "$time_limit")
+  payload=$(json_build_sub "$lang_id" "$code" "$time_limit")
 
   local resp
   resp=$(curl -sf -X POST "$BASE_URL/submissions?wait=true" \
@@ -150,27 +177,8 @@ submit_and_verify() {
     -d "$payload")
 
   local actual_status actual_stdout
-  actual_status=$(echo "$resp" | node -e '
-    let data = "";
-    process.stdin.on("data", c => data += c);
-    process.stdin.on("end", () => {
-      try {
-        const p = JSON.parse(data);
-        console.log(p.status?.id || 0);
-      } catch { console.log(0); }
-    });
-  ')
-
-  actual_stdout=$(echo "$resp" | node -e '
-    let data = "";
-    process.stdin.on("data", c => data += c);
-    process.stdin.on("end", () => {
-      try {
-        const p = JSON.parse(data);
-        console.log((p.stdout || "").trim());
-      } catch { console.log(""); }
-    });
-  ')
+  actual_status=$(json_get_status_id "$resp")
+  actual_stdout=$(json_get_stdout "$resp")
 
   [ "$actual_status" -eq "$expected_status_id" ] && [[ "$actual_stdout" == *"$expected_stdout"* ]]
 }
@@ -213,14 +221,7 @@ test_tle() {
     -d "$payload")
 
   local status_id
-  status_id=$(echo "$resp" | node -e '
-    let data = "";
-    process.stdin.on("data", c => data += c);
-    process.stdin.on("end", () => {
-      const p = JSON.parse(data);
-      console.log(p.status?.id || 0);
-    });
-  ')
+  status_id=$(json_get_status_id "$resp")
   [ "$status_id" -eq 5 ]
 }
 
@@ -292,18 +293,24 @@ test_prometheus_targets() {
 
   # Verify at least one active target and zero targets reporting health != up
   local unhealth_count
-  unhealth_count=$(echo "$targets_json" | node -e '
-    let data = "";
-    process.stdin.on("data", c => data += c);
-    process.stdin.on("end", () => {
-      try {
-        const res = JSON.parse(data);
-        const active = res.data?.activeTargets || [];
-        const down = active.filter(t => t.health !== "up");
-        console.log(down.length);
-      } catch { console.log(0); }
-    });
-  ')
+  if command -v jq >/dev/null 2>&1; then
+    unhealth_count=$(echo "$targets_json" | jq -r '[.data.activeTargets[] | select(.health != "up")] | length' 2>/dev/null || echo 0)
+  elif command -v python3 >/dev/null 2>&1; then
+    unhealth_count=$(echo "$targets_json" | python3 -c 'import json, sys; res = json.load(sys.stdin); print(len([t for t in res.get("data", {}).get("activeTargets", []) if t.get("health") != "up"]))' 2>/dev/null || echo 0)
+  elif command -v node >/dev/null 2>&1; then
+    unhealth_count=$(echo "$targets_json" | node -e '
+      let data = "";
+      process.stdin.on("data", c => data += c);
+      process.stdin.on("end", () => {
+        try {
+          const res = JSON.parse(data);
+          const active = res.data?.activeTargets || [];
+          const down = active.filter(t => t.health !== "up");
+          console.log(down.length);
+        } catch { console.log(0); }
+      });
+    ')
+  fi
   [ "$unhealth_count" -eq 0 ]
 }
 
