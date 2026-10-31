@@ -1,0 +1,14 @@
+export default {
+  id: 7,
+  name: "SQL (SQLite 3)",
+  category: "database",
+  extension: "sql",
+  is_archived: false,
+  source_file: "query.sql",
+  compile_cmd: null,
+  run_cmd: "sqlite3 -header -column /box/db.sqlite < query.sql",
+  image: "coderunner/sqlite:3",
+  default_time_limit: 5,
+  max_time_limit: 30,
+  min_memory: 0,
+};

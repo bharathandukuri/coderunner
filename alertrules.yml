@@ -1,0 +1,57 @@
+groups:
+  - name: coderunner_database_pool_alerts
+    rules:
+      - alert: DatabasePoolDepthDepleted
+        expr: coderunner_pool_depth == 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database warm pool depth depleted for {{ $labels.engine }}"
+          description: "Pool has 0 warm containers available for {{ $labels.engine }} over the last 1 minute."
+
+      - alert: DatabasePoolWaitersHigh
+        expr: coderunner_pool_waiters > 5
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of waiters in database pool for {{ $labels.engine }}"
+          description: "More than 5 requests are currently queued waiting for a {{ $labels.engine }} container."
+
+      - alert: DatabasePoolBootSlow
+        expr: histogram_quantile(0.95, rate(coderunner_pool_boot_duration_seconds_bucket[5m])) > 3
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow container boot for {{ $labels.engine }}"
+          description: "95th percentile container boot duration exceeds 3 seconds for {{ $labels.engine }}."
+
+      - alert: DatabasePoolBootFailuresSpike
+        expr: rate(coderunner_pool_boot_failures_total[5m]) > 0.1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container boot failure rate high for {{ $labels.engine }}"
+          description: "Container boots are failing repeatedly for {{ $labels.engine }}."
+
+      - alert: DatabasePoolAcquireWaitHigh
+        expr: histogram_quantile(0.95, rate(coderunner_pool_acquire_wait_duration_seconds_bucket[5m])) > 2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High acquire wait latency for {{ $labels.engine }}"
+          description: "Requests are waiting longer than 2 seconds to acquire a {{ $labels.engine }} container."
+
+      - alert: DatabasePoolCircuitBreakerTripped
+        expr: coderunner_pool_circuit_state > 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker tripped for {{ $labels.engine }}"
+          description: "Circuit breaker for {{ $labels.engine }} has tripped into half-open or open state due to consecutive boot failures."
+

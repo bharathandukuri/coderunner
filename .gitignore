@@ -1,0 +1,11 @@
+node_modules/
+.env
+*.log
+.DS_Store
+coverage/
+dist/
+certs/
+*.pem
+redis_data/
+prometheus_data/
+grafana_data/

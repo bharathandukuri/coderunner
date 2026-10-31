@@ -1,0 +1,165 @@
+services:
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # Blank/unset DOMAIN => ":80" => plain HTTP on the server's IP, no SSL.
+      - SITE_ADDRESS=${DOMAIN:-:80}
+      # Must be non-empty: Caddy's header matcher fails to parse on a blank
+      # value and the container crashloops with "malformed header matcher".
+      - "METRICS_TOKEN=${METRICS_TOKEN:?METRICS_TOKEN must be set (generate one with openssl rand -hex 16)}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '${CADDY_CPUS:-0.25}'
+          memory: ${CADDY_MEMORY:-128M}
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - "AUTH_TOKEN=${AUTH_TOKEN:?AUTH_TOKEN must be set - an empty token disables auth entirely}"
+      - PORT=3000
+      - BODY_LIMIT=50mb
+      - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-200}
+    depends_on:
+      - redis
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '${API_CPUS:-0.25}'
+          memory: ${API_MEMORY:-256M}
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    command: node src/queue/worker.js
+    privileged: true
+    # isolate writes to /sys/fs/cgroup/cgroup.subtree_control; the host cgroup
+    # namespace is required for that to take effect (see docker/worker/entrypoint.sh).
+    cgroup: host
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - WORKER_TYPE=isolate
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+      - DEFAULT_MEMORY_LIMIT=${DEFAULT_MEMORY_LIMIT:-256000}
+      - MAX_MEMORY_LIMIT=${MAX_MEMORY_LIMIT:-512000}
+      - RESULT_CACHE_TTL=${RESULT_CACHE_TTL:-1800}
+    depends_on:
+      - redis
+    restart: always
+    deploy:
+      resources:
+        limits:
+          # Must not exceed the host's vCPU count or Docker refuses to start it.
+          cpus: '${WORKER_CPUS:-1.5}'
+          memory: ${WORKER_MEMORY:-4G}
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    environment:
+      - CONTAINERS=1
+      - POST=1
+      - IMAGES=1
+      - EXEC=1
+      - INFO=1
+      - NETWORKS=0
+      - VOLUMES=0
+      - SWARM=0
+      - NODES=0
+      - SERVICES=0
+      - SECRETS=0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 64M
+
+  worker-db:
+    build:
+      context: .
+      dockerfile: docker/worker/Dockerfile
+    command: node src/queue/worker.js
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - DOCKER_HOST=tcp://docker-proxy:2375
+      - WORKER_TYPE=db
+      - WORKER_CONCURRENCY=${WORKER_DB_CONCURRENCY:-2}
+      - RESULT_CACHE_TTL=${RESULT_CACHE_TTL:-1800}
+    depends_on:
+      - redis
+      - docker-proxy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '${WORKER_DB_CPUS:-1.5}'
+          memory: ${WORKER_DB_MEMORY:-2G}
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-256mb} --maxmemory-policy noeviction
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '${REDIS_CPUS:-0.25}'
+          memory: ${REDIS_MEMORY:-384M}
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}'
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '${PROMETHEUS_CPUS:-0.25}'
+          memory: ${PROMETHEUS_MEMORY:-512M}
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '${GRAFANA_CPUS:-0.25}'
+          memory: ${GRAFANA_MEMORY:-256M}
+
+volumes:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+  caddy_data:
+  caddy_config:

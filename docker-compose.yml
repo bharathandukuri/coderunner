@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/executor/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - AUTH_TOKEN=dev-token
+    depends_on:
+      - redis
+    volumes:
+      - ./src:/app/src:ro
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/executor/Dockerfile
+    command: node src/queue/worker.js
+    environment:
+      - NODE_ENV=development
+      - REDIS_URL=redis://redis:6379
+      - WORKER_CONCURRENCY=4
+    depends_on:
+      - redis
+    volumes:
+      - ./src:/app/src:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  redis_data:
