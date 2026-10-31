@@ -16,6 +16,18 @@ export function authMiddleware(req, res, next) {
     if (token) break;
   }
 
+  // Also support standard Authorization: Bearer <token>
+  if (!token) {
+    const authHeader = req.get('authorization');
+    if (authHeader) {
+      if (authHeader.startsWith('Bearer ')) {
+        token = authHeader.slice(7).trim();
+      } else {
+        token = authHeader.trim();
+      }
+    }
+  }
+
   if (!token) {
     return res.status(401).json({
       error: 'Authentication required',

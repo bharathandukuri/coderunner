@@ -73,7 +73,7 @@ done
 # Try reading from .env if not provided
 if [ -f "$PROJECT_DIR/.env" ]; then
   if [ -z "$AUTH_TOKEN" ]; then
-    AUTH_TOKEN=$(grep '^AUTH_TOKEN=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
+    AUTH_TOKEN=$(grep '^AUTH_TOKEN=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"'\''' | awk '{print $1}')
   fi
   if [ "$BASE_URL" = "http://localhost" ]; then
     DOMAIN=$(grep '^DOMAIN=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
@@ -172,6 +172,7 @@ submit_and_verify() {
 
   local resp
   resp=$(curl -sf -X POST "$BASE_URL/submissions?wait=true" \
+    -H "X-Auth-Token: $AUTH_TOKEN" \
     -H "Authorization: Bearer $AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$payload")
@@ -216,6 +217,7 @@ test_tle() {
   payload='{"language_id": 5, "source_code": "while True: pass", "time_limit": 1}'
   local resp
   resp=$(curl -sf -X POST "$BASE_URL/submissions?wait=true" \
+    -H "X-Auth-Token: $AUTH_TOKEN" \
     -H "Authorization: Bearer $AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$payload")
@@ -229,6 +231,7 @@ test_tle() {
 test_wait_true() {
   local resp
   resp=$(curl -sf -X POST "$BASE_URL/submissions?wait=true" \
+    -H "X-Auth-Token: $AUTH_TOKEN" \
     -H "Authorization: Bearer $AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d '{"language_id": 5, "source_code": "import time; time.sleep(0.1); print(\"WAIT_TRUE_OK\")"}')
@@ -253,6 +256,7 @@ EOF
 )
   local resp
   resp=$(curl -sf -X POST "$BASE_URL/submissions/multi?wait=true" \
+    -H "X-Auth-Token: $AUTH_TOKEN" \
     -H "Authorization: Bearer $AUTH_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$payload")
