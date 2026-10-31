@@ -146,10 +146,14 @@ PORT_ISSUES=0
 
 # Verify ports 80 and 443 are not taken by competing services (other than docker/caddy)
 for port in 80 443; do
-  if ss -tulpn 2>/dev/null | grep -E ":$port\s" | grep -qvE 'docker|caddy'; then
-    echo -e "\n${RED}✗ Port $port is already bound by non-CodeRunner service:${NC}"
-    ss -tulpn 2>/dev/null | grep -E ":$port\s"
-    PORT_ISSUES=$((PORT_ISSUES + 1))
+  local_listeners=$(sudo ss -tulpn 2>/dev/null || ss -tulpn 2>/dev/null || true)
+  if echo "$local_listeners" | grep -E ":$port\s" | grep -qvE 'docker|caddy'; then
+    # If process name couldn't be resolved or unprivileged, check if Docker is publishing the port
+    if ! docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":$port->"; then
+      echo -e "\n${RED}✗ Port $port is already bound by non-CodeRunner service:${NC}"
+      echo "$local_listeners" | grep -E ":$port\s"
+      PORT_ISSUES=$((PORT_ISSUES + 1))
+    fi
   fi
 done
 
