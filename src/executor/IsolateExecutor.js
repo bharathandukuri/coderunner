@@ -34,6 +34,7 @@ class IsolateExecutor {
       ]);
       boxDir = initOut.trim();                     // e.g. /var/local/lib/isolate/0
       const workDir = path.join(boxDir, 'box');    // host path: <root>/box/ maps to /box inside sandbox
+      await fs.chmod(workDir, 0o777);
 
       // ── Write source code (skip if empty or multi-file) ────────────
       if (submission.source_code && language.source_file) {
@@ -412,6 +413,7 @@ class IsolateExecutor {
       ]);
       boxDir = initOut.trim();
       const workDir = path.join(boxDir, 'box');
+      await fs.chmod(workDir, 0o777);
 
       // Write all files into workDir
       for (const file of files) {
