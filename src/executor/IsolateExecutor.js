@@ -248,7 +248,8 @@ class IsolateExecutor {
     ];
 
     if (stdinFile) {
-      args.push(`--stdin=/box/_stdin.txt`);  // sandbox path (file written to workDir on host)
+      const stdinBase = path.basename(stdinFile);
+      args.push(`--stdin=/box/${stdinBase}`);  // sandbox path (file written to workDir on host)
     }
 
     args.push('--run', '--', '/bin/sh', '-c', `cd /box && ${cmd}`);
