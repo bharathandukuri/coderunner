@@ -54,7 +54,7 @@ For `WORKER_TYPE=db` with PostgreSQL (pool size=2) and MySQL (pool size=2):
 
 ## Empirical Benchmark Results
 
-The following benchmark figures are **unmodified, real measurements** produced directly by `scripts/bench-pool.mjs` (5 iterations) on an active CodeRunner instance.
+The following benchmark figures are **unmodified, real measurements** produced directly by `scripts/bench-pool.mjs` (200 iterations) on an active CodeRunner instance.
 
 Raw benchmark JSON: [`docs/benchmarks/benchmark.json`](benchmarks/benchmark.json).
 
@@ -68,8 +68,8 @@ Raw benchmark JSON: [`docs/benchmarks/benchmark.json`](benchmarks/benchmark.json
 | **Kernel Version** | 7.2.13-200.fc44.x86_64 |
 | **Docker Version** | 29.9.2 |
 | **Storage Driver** | overlayfs |
-| **Commit Hash** | `e9329e6338cb68541ed70ecba810bf840c121772` |
-| **Date** | 2026-10-31T17:18:49.463Z |
+| **Commit Hash** | `70cdb739d7f0af37df9fb8b96ddcb904c07866a2` |
+| **Date** | 2026-10-31T17:43:04.637Z |
 
 ---
 
@@ -77,17 +77,17 @@ Raw benchmark JSON: [`docs/benchmarks/benchmark.json`](benchmarks/benchmark.json
 
 Measures total time to invoke Docker create, start container, and verify daemon socket readiness (`/box/.ready`):
 
-> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `e9329e6`, 2026-10-31.
+> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `70cdb73`, 2026-10-31.
 
 | Container / Engine | p50 (ms) | p95 (ms) | p99 (ms) | Min (ms) | Max (ms) | Avg (ms) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **PostgreSQL 16** | **331** | 392 | 392 | 280 | 392 | 330 |
-| **MySQL 8.4** | **750** | 924 | 924 | 706 | 924 | 793 |
-| **Python 3.8 (Cold on-demand)** | **127** | 139 | 139 | 117 | 139 | 126 |
-| **Python 3.8 (Warm hit)** | **1** | 2 | 3 | 0 | 4 | 1 |
+| **PostgreSQL 16** | **308** | 1122 | 1569 | 248 | 1978 | 406 |
+| **MySQL 8.4** | **664** | 1454 | 1723 | 571 | 2006 | 750 |
+| **Python 3.8 (Cold on-demand)** | **114** | 994 | 1114 | 99 | 1281 | 242 |
+| **Python 3.8 (Warm hit)** | **2** | 264 | 380 | 0 | 492 | 77 |
 
 > [!NOTE]
-> Warm hits for language pools provide a **~100x speedup strictly for container acquisition** (reducing sandbox acquisition from ~127ms down to ~1ms). This speedup applies to the container boot/acquisition phase only; see Table 4 for end-to-end API latency analysis.
+> Warm hits for language pools provide a **~50x to 100x speedup strictly for container acquisition** (reducing sandbox acquisition from ~114ms down to ~2ms at p50). This speedup applies to the container boot/acquisition phase only; see Table 4 for end-to-end API latency analysis.
 
 ---
 
@@ -95,13 +95,13 @@ Measures total time to invoke Docker create, start container, and verify daemon 
 
 Measured via Docker container stats (`MemoryStats.usage` net of buffer cache):
 
-> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `e9329e6`, 2026-10-31.
+> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `70cdb73`, 2026-10-31.
 
 | Container / Engine | Net Usage (MB) | Total Usage with Cache (MB) |
 |---|:---:|:---:|
-| **PostgreSQL 16** | 57.81 MB | 57.81 MB |
-| **MySQL 8.4** | 242.02 MB | 242.28 MB |
-| **Python 3.8 (Cold)** | 1.37 MB | 1.37 MB |
+| **PostgreSQL 16** | 57.08 MB | 57.08 MB |
+| **MySQL 8.4** | 243.63 MB | 243.89 MB |
+| **Python 3.8 (Cold)** | 1.70 MB | 1.70 MB |
 
 ---
 
@@ -113,14 +113,14 @@ Measured during execution of high-row synthetic benchmarks:
 
 Peak memory sampled via cgroup `memory.peak` (and polled at <=25 ms during execution):
 
-> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `e9329e6`, 2026-10-31.
+> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `70cdb73`, 2026-10-31.
 
 | Engine | Peak RAM (MB) | tmpfs Mount Usage (`/box`) |
 |---|:---:|:---:|
-| **PostgreSQL 16** | 62.97 MB | 45.12 MB |
-| **MySQL 8.4** | 250.43 MB | 99.61 MB |
+| **PostgreSQL 16** | 62.89 MB | 45.12 MB |
+| **MySQL 8.4** | 251.39 MB | 99.61 MB |
 
-*Note: Sampling cgroup `memory.peak` accurately reflects peak memory reached during the workload, ensuring peak RAM (62.97 MB for PG, 250.43 MB for MySQL) >= idle RAM (57.81 MB and 242.02 MB).*
+*Note: Sampling cgroup `memory.peak` accurately reflects peak memory reached during the workload, ensuring peak RAM (62.89 MB for PG, 251.39 MB for MySQL) >= idle RAM (57.08 MB and 243.63 MB).*
 
 ---
 
@@ -128,19 +128,19 @@ Peak memory sampled via cgroup `memory.peak` (and polled at <=25 ms during execu
 
 Measured across HTTP API roundtrips (`POST /submissions?wait=true`) with auth validation, queue transit, sandbox execution, and result collection:
 
-> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `e9329e6`, 2026-10-31.
+> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `70cdb73`, 2026-10-31.
 
-| Language / Engine | Warm p50 (ms) | Warm p95 (ms) | Cold Avg (ms) |
-|---|:---:|:---:|:---:|
-| **PostgreSQL 16** | 306 ms | 308 ms | 240 ms |
-| **MySQL 8.4** | 305 ms | 307 ms | 340 ms |
-| **Python 3.8** | 306 ms | 308 ms | 306 ms |
+| Language / Engine | Warm p50 (ms) | Warm p95 (ms) | Cold Avg (ms) | Server Warm p50 (ms) | Server Cold Avg (ms) |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **PostgreSQL 16** | 161 ms | 1582 ms | 159 ms | 157 ms | 155 ms |
+| **MySQL 8.4** | 260 ms | 599 ms | 340 ms | 255 ms | 335 ms |
+| **Python 3.8** | 208 ms | 1344 ms | 199 ms | 204 ms | 195 ms |
 
 > [!NOTE]
 > **End-to-End Latency Analysis & Observations**:
 > - End-to-end execution measures total client-perceived roundtrip time over HTTP (`POST /submissions?wait=true`). When clients request `wait=true`, the API implements a push-based wait over Redis Pub/Sub (`submission:<token>:done` channel) with an active 100 ms polling fallback, rather than pure periodic polling. This eliminates up to 100 ms of polling quantization jitter and immediately delivers results as soon as the worker completes execution and persists the output. Server-side execution duration (`finished_at - created_at`) directly captures queue transit, sandbox acquisition, code execution, and result persistence.
-> - **Database Daemons**: For MySQL 8.4, warm pool execution achieves p50 of 305 ms vs cold average of 340 ms (cold peak 407 ms). Because cold database boots require initializing the full DBMS server daemon (~750 ms), running with warm daemons avoids queue congestion and startup latency spikes.
-> - **Python (3.8)**: In standard worker configurations, `ENABLE_LANGUAGE_POOL` defaults to `false`. As a result, Python submissions execute on-demand in both test runs, yielding identical baseline latencies (~306 ms). The ~100x speedup observed in Table 1 applies strictly to container acquisition (1 ms warm vs 127 ms cold); once enqueued through HTTP and BullMQ, queue transit and IPC overhead account for the majority of the wall-clock duration.
+> - **Database Daemons**: For MySQL 8.4, warm pool execution achieves p50 of 260 ms (server p50 255 ms) vs cold average of 340 ms (server average 335 ms). Because cold database boots require initializing the full DBMS server daemon (~664–750 ms), running with warm daemons avoids queue congestion and startup latency spikes.
+> - **Python (3.8)**: In standard worker configurations, `ENABLE_LANGUAGE_POOL` defaults to `false`. As a result, Python submissions execute on-demand in both test runs, yielding identical baseline latencies (~208 ms). The ~50x speedup observed in Table 1 applies strictly to container acquisition (2 ms warm vs 114 ms cold); once enqueued through HTTP and BullMQ, queue transit and IPC overhead account for the majority of the wall-clock duration.
 
 ---
 

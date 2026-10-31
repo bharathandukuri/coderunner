@@ -218,7 +218,11 @@ async function main() {
       try {
         const { duration, container } = await measureBootTime(id);
         times.push(duration);
-        containersToClean.push(container);
+        if (i === ITERATIONS - 1) {
+          const mem = await getContainerMemory(container);
+          report.idleRam[name] = `${mem.netUsageMB} MB (net) / ${mem.usageMB} MB (total)`;
+        }
+        await container.remove({ force: true, v: true }).catch(() => {});
       } catch (err) {
         console.error(`Boot error: ${err.message}`);
       }
@@ -226,17 +230,6 @@ async function main() {
 
     report.boots[name] = statsSummary(times);
     console.log(`p50: ${report.boots[name].p50}ms | p95: ${report.boots[name].p95}ms | p99: ${report.boots[name].p99}ms`);
-
-    // Measure idle RAM on the last container before destroying
-    if (containersToClean.length > 0) {
-      const last = containersToClean[containersToClean.length - 1];
-      const mem = await getContainerMemory(last);
-      report.idleRam[name] = `${mem.netUsageMB} MB (net) / ${mem.usageMB} MB (total)`;
-    }
-
-    for (const c of containersToClean) {
-      await c.remove({ force: true, v: true }).catch(() => {});
-    }
   }
 
   // Python warm acquire measurement
