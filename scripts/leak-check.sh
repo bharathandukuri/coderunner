@@ -55,17 +55,17 @@ echo "================================================="
 
 LEAKS_DETECTED=0
 
-# 1. Check Dangling Docker Volumes
+# 1. Check Dangling Anonymous Docker Volumes (ignoring named persistent compose volumes)
 echo -n "• Checking for dangling anonymous Docker volumes... "
-DANGLING_VOLUMES=$(docker volume ls -qf dangling=true 2>/dev/null || true)
+DANGLING_VOLUMES=$(docker volume ls -qf dangling=true 2>/dev/null | grep -E '^[0-9a-f]{64}$' || true)
 
 if [ -n "$DANGLING_VOLUMES" ]; then
   echo -e "${RED}✗ LEAK DETECTED${NC}"
-  echo "Found dangling volumes:"
+  echo "Found dangling anonymous volumes:"
   echo "$DANGLING_VOLUMES"
   LEAKS_DETECTED=$((LEAKS_DETECTED + 1))
 else
-  echo -e "${GREEN}✓ Clean (0 dangling volumes)${NC}"
+  echo -e "${GREEN}✓ Clean (0 dangling anonymous volumes)${NC}"
 fi
 
 # 2. Check Warm Pool Containers
