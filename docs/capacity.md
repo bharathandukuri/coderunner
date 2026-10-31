@@ -96,7 +96,9 @@ Measures total time to invoke Docker create, start container, and verify daemon 
 | **Python 3.8 (Warm hit)** | **2** | 264 | 380 | 0 | 492 | 77 |
 
 > [!NOTE]
-> Warm hits for language pools provide a **~50x to 100x speedup strictly for container acquisition** (reducing sandbox acquisition from ~114ms down to ~2ms at p50). This speedup applies to the container boot/acquisition phase only; see Table 4 for end-to-end API latency analysis.
+> Warm hits for language pools provide a **~50x speedup strictly for median container acquisition** (reducing median sandbox acquisition from ~114 ms cold down to ~2 ms warm; however, p95 is 264 ms and p99 is 380 ms warm vs p95 994 ms and p99 1,114 ms cold). This 50x speedup applies to the **median acquisition phase only**; see Table 4 for end-to-end API latency analysis.
+> 
+> *Note on Hardware:* All empirical measurements reported in this document were conducted on a developer laptop (12th Gen Intel Core i5-12500H, 16 cores, 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64) and must be re-measured on production hardware.
 
 ---
 
@@ -137,19 +139,20 @@ Peak memory sampled via cgroup `memory.peak` (and polled at <=25 ms during execu
 
 Measured across HTTP API roundtrips (`POST /submissions?wait=true`) with auth validation, queue transit, sandbox execution, and result collection:
 
-> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `70cdb73`, 2026-10-31.
+> **Environment:** 12th Gen Intel(R) Core(TM) i5-12500H (16 cores), 15.23 GB RAM, Linux 7.2.13-200.fc44.x86_64, Docker 29.9.2 (overlayfs), commit `70cdb73`, 2026-10-31. *(Dev laptop environment — re-measurement on production server hardware required).*
 
-| Language / Engine | Warm p50 (ms) | Warm p95 (ms) | Cold Avg (ms) | Server Warm p50 (ms) | Server Cold Avg (ms) |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **PostgreSQL 16** | 161 ms | 1582 ms | 159 ms | 157 ms | 155 ms |
-| **MySQL 8.4** | 260 ms | 599 ms | 340 ms | 255 ms | 335 ms |
-| **Python 3.8** | 208 ms | 1344 ms | 199 ms | 204 ms | 195 ms |
+| Language / Engine | Warm p50 (ms) | Warm p95 (ms) | Warm p99 (ms) | Cold / Baseline Avg (ms) | Server Warm p50 (p95 / p99) (ms) | Server Cold / Baseline Avg (ms) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| **PostgreSQL 16** | 161 ms | 1582 ms (~1.6 s) | 2800 ms (~2.8 s) | 159 ms (p50: 158 ms) | 157 ms (1536 / 2783 ms) | 155 ms |
+| **MySQL 8.4** | 260 ms | 599 ms | 802 ms | 340 ms (p50: 213 ms) | 255 ms (595 / 798 ms) | 335 ms |
+| **Python 3.8 (Run 1 / Run 2)** | 208 ms (Run 1) | 1344 ms | 1663 ms | 199 ms (Run 2 avg) | 204 ms (1333 / 1660 ms) | 195 ms |
 
 > [!NOTE]
 > **End-to-End Latency Analysis & Observations**:
 > - End-to-end execution measures total client-perceived roundtrip time over HTTP (`POST /submissions?wait=true`). When clients request `wait=true`, the API implements a push-based wait over Redis Pub/Sub (`submission:<token>:done` channel) with an active 100 ms polling fallback, rather than pure periodic polling. This eliminates up to 100 ms of polling quantization jitter and immediately delivers results as soon as the worker completes execution and persists the output. Server-side execution duration (`finished_at - created_at`) directly captures queue transit, sandbox acquisition, code execution, and result persistence.
-> - **Database Daemons**: For MySQL 8.4, warm pool execution achieves p50 of 260 ms (server p50 255 ms) vs cold average of 340 ms (server average 335 ms). Because cold database boots require initializing the full DBMS server daemon (~664–750 ms), running with warm daemons avoids queue congestion and startup latency spikes.
-> - **Python (3.8)**: In standard worker configurations, `ENABLE_LANGUAGE_POOL` defaults to `false`. As a result, Python submissions execute on-demand in both test runs, yielding identical baseline latencies (~208 ms). The ~50x speedup observed in Table 1 applies strictly to container acquisition (2 ms warm vs 114 ms cold); once enqueued through HTTP and BullMQ, queue transit and IPC overhead account for the majority of the wall-clock duration.
+> - **Database Daemons (Invalidity of Cold vs Warm Comparison)**: For database languages (PostgreSQL and MySQL), the benchmark's "cold" test runs were executed against the same worker stack with warm pools enabled. Both test passes therefore acquired pre-warmed database daemon containers from the pool. As a result, **the comparison between cold and warm database latency in these test runs is invalid**; any claim that warm MySQL beats cold MySQL is unfounded from these numbers. True cold database boots without a warm pool require initializing the full DBMS server daemon from scratch (~664–750 ms boot time from Table 1).
+> - **Tail Latency Under Load**: While median warm roundtrips are fast (p50 of 161 ms for PostgreSQL, 260 ms for MySQL), tail latency under high-concurrency bursts increases significantly: PostgreSQL warm p95 reaches 1,582 ms (~1.6 s) and p99 reaches 2,800 ms (~2.8 s), and MySQL warm p95 reaches 599 ms / p99 802 ms as queue transit and worker concurrency slots saturate.
+> - **Python 3.8**: In standard worker configurations, `ENABLE_LANGUAGE_POOL` defaults to `false`. As a result, both test passes executed on-demand with the language pool disabled (relabelled as Run 1 and Run 2 in Table 4), yielding similar baseline latencies (Run 1 p50: 208 ms, p95: 1,344 ms; Run 2 avg: 199 ms, p50: 197 ms). The ~50x speedup observed in Table 1 applies strictly to the median container acquisition phase (2 ms warm vs 114 ms cold; p95: 264 ms vs 994 ms); once enqueued through HTTP and BullMQ, queue transit, execution, and IPC account for the majority of client wall-clock duration.
 
 ---
 
@@ -157,8 +160,12 @@ Measured across HTTP API roundtrips (`POST /submissions?wait=true`) with auth va
 
 1. **Global Concurrent Boot Cap (`WARM_POOL_MAX_CONCURRENT_BOOTS`)**:
    - Default is `3`. On multi-core bare-metal hosts with fast NVMe disks, this can be increased to `concurrency` (e.g. 4–8) to replenish drained pools faster after high-load bursts.
-2. **Dedicated Worker Segmentation (`WORKER_TYPE=db`)**:
+2. **Pool Size Exceeding Concurrency for Sustained Load (Marked Untested)**:
+   - Setting a target pool size larger than worker concurrency (`targetPoolSize > concurrency`, for example `WARM_POOL_TARGET_POSTGRES=6` or `8` with `WORKER_CONCURRENCY=4`) may help buffer sustained high-throughput burst traffic by providing additional pre-warmed idle containers while background replenishment boots new ones. *(Note: Marked untested pending long-term soak testing under heavy production loads).*
+3. **Dedicated Worker Segmentation (`WORKER_TYPE=db`)**:
    - Isolate workers (`WORKER_TYPE=isolate`) run CPU-bound untrusted code in lightweight cgroups.
    - Database workers (`WORKER_TYPE=db`) run the long-lived warm PostgreSQL and MySQL daemon pools. Keep them separated in production via Docker Compose or Kubernetes pods to avoid cross-tenant CPU/memory starvation.
-3. **Tmpfs Sizing**:
+4. **Tmpfs Sizing**:
    - Database daemons store their temporary WAL, tables, and Unix sockets in memory (`tmpfs`). Sizing `/box` to 256 MB and `/tmp` to 64 MB (as configured in `src/executor/containerConfig.js`) ensures complex subqueries and sorting operations execute in RAM without disk I/O bottlenecks.
+5. **Rate Limiting**:
+   - The API enforces dedicated rate limiting for `POST /submissions` (configured via `RATE_LIMIT_SUBMISSIONS_WINDOW_MS`, default 60000 ms, and `RATE_LIMIT_SUBMISSIONS_MAX`, default 120 requests/window) in addition to global IP rate limits (`RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_REQUESTS`), protecting the execution queue from denial-of-service floods.

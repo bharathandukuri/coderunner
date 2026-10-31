@@ -1093,5 +1093,78 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       `Found hardcoded numeric literals assigned to report in bench-pool.mjs:\n${violations.join('\n')}`
     );
   });
+
+  it('29. waitForResult handles 50 concurrent waiters with single listener and no memory leak (Part 1.1)', async () => {
+    const { EventEmitter } = await import('events');
+    const { waitForResult, activeWaiters } = await import('../src/api/routes/submissions.js');
+    const { setSubscriberRedis, setRedis } = await import('../src/queue/producer.js');
+
+    class MockSubscriber extends EventEmitter {
+      constructor() {
+        super();
+        this.status = 'ready';
+        this.subscribedChannels = new Set();
+      }
+      async subscribe(ch) {
+        this.subscribedChannels.add(ch);
+      }
+      async unsubscribe(ch) {
+        this.subscribedChannels.delete(ch);
+      }
+    }
+
+    const mockSub = new MockSubscriber();
+    const mockData = new Map();
+    const mockRedis = {
+      status: 'ready',
+      async get(key) {
+        return mockData.get(key) || null;
+      },
+    };
+
+    setSubscriberRedis(mockSub);
+    setRedis(mockRedis);
+
+    const warnings = [];
+    const onWarning = (w) => warnings.push(w);
+    process.on('warning', onWarning);
+
+    try {
+      const tokens = Array.from({ length: 50 }, (_, i) => `concurrent-test-token-${i}`);
+      const waitPromises = tokens.map((t) => waitForResult(t, 5000));
+
+      // Assert single listener on mockSub
+      assert.strictEqual(mockSub.listenerCount('message'), 1, 'Only one listener attached to subscriber connection');
+
+      // Publish results for all 50 tokens
+      for (const t of tokens) {
+        const payload = JSON.stringify({
+          token: t,
+          status: { id: 3, description: 'Accepted' },
+          stdout: `output for ${t}`,
+          created_at: new Date().toISOString(),
+          finished_at: new Date().toISOString(),
+        });
+        mockSub.emit('message', `submission:${t}:done`, payload);
+      }
+
+      const results = await Promise.all(waitPromises);
+      assert.strictEqual(results.length, 50);
+      for (let i = 0; i < 50; i++) {
+        assert.strictEqual(results[i].token, tokens[i]);
+        assert.strictEqual(results[i].status.id, 3);
+        assert.strictEqual(results[i].stdout, `output for ${tokens[i]}`);
+      }
+
+      const maxListenerWarnings = warnings.filter((w) => w.name === 'MaxListenersExceededWarning');
+      assert.strictEqual(maxListenerWarnings.length, 0, 'No MaxListenersExceededWarning should be emitted');
+      assert.strictEqual(activeWaiters.size, 0, 'activeWaiters map must be empty after all waiters finish');
+      assert.strictEqual(mockSub.listenerCount('message'), 1, 'Shared listener remains, no per-waiter listener leak');
+    } finally {
+      process.removeListener('warning', onWarning);
+      setSubscriberRedis(null);
+      setRedis(null);
+    }
+  });
 });
 

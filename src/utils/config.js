@@ -41,6 +41,8 @@ const config = {
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
     maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100,
+    submissionsWindowMs: parseInt(process.env.RATE_LIMIT_SUBMISSIONS_WINDOW_MS) || 60000,
+    submissionsMax: parseInt(process.env.RATE_LIMIT_SUBMISSIONS_MAX) || 120,
   },
 
   docker: {

@@ -8,6 +8,7 @@ import {
   sanitizeCompilerOptions,
   sanitizeCommandLineArgs,
 } from '../middleware/validation.js';
+import { submissionsRateLimitMiddleware } from '../middleware/rateLimit.js';
 import { addSubmission, getSubmission, deleteSubmission, getSubscriberRedis } from '../../queue/producer.js';
 import { getLanguageById, getStatusById } from '../../languages/index.js';
 import { decodeIfNeeded, encodeIfNeeded } from '../../utils/base64.js';
@@ -158,34 +159,81 @@ function resolveTimeLimits(data, language) {
   return { effectiveWall, effectiveCpu };
 }
 
+// Map of active waiters: token -> Set<resolveFunction>
+const activeWaiters = new Map();
+let sharedSubListenerAttached = false;
+let currentSubscriber = null;
+
+function onSharedMessage(channel, message) {
+  const prefix = 'submission:';
+  const suffix = ':done';
+  if (typeof channel === 'string' && channel.startsWith(prefix) && channel.endsWith(suffix)) {
+    const token = channel.slice(prefix.length, -suffix.length);
+    const resolvers = activeWaiters.get(token);
+    if (resolvers && resolvers.size > 0) {
+      try {
+        const parsed = JSON.parse(message);
+        if (parsed && parsed.status && parsed.status.id > 2) {
+          for (const resolve of Array.from(resolvers)) {
+            resolve(parsed);
+          }
+        }
+      } catch (err) {
+        logger.error({ event: 'pubsub_message_parse_error', token, error: err.message });
+      }
+    }
+  }
+}
+
+function ensureSharedSubscriberListener(sub) {
+  if (!sub || (sharedSubListenerAttached && currentSubscriber === sub)) return;
+
+  if (currentSubscriber && currentSubscriber !== sub && sharedSubListenerAttached) {
+    try {
+      currentSubscriber.removeListener('message', onSharedMessage);
+    } catch {}
+    sharedSubListenerAttached = false;
+  }
+
+  currentSubscriber = sub;
+  sub.on('message', onSharedMessage);
+  sharedSubListenerAttached = true;
+}
+
 /**
  * Wait for submission result using push-based Redis Pub/Sub with polling fallback
  */
 async function waitForResult(token, maxWait = 15000) {
   const start = Date.now();
   const cappedMaxWait = Math.min(maxWait, config.execution.maxWaitTimeout || 15000);
-
-  // 1. Initial check: fast or cached job may already be done
-  const initial = await getSubmission(token);
-  if (initial && initial.status && initial.status.id > 2) {
-    return initial;
-  }
-
-  // 2. Push-based notification wait via Redis Pub/Sub
   const sub = getSubscriberRedis();
   const channel = `submission:${token}:done`;
 
-  return new Promise((resolve) => {
+  ensureSharedSubscriberListener(sub);
+
+  return new Promise(async (resolve) => {
     let resolved = false;
     let pollTimer = null;
     let timeoutTimer = null;
 
     const cleanup = () => {
-      if (pollTimer) clearInterval(pollTimer);
-      if (timeoutTimer) clearTimeout(timeoutTimer);
-      if (sub && (sub.status === 'ready' || sub.status === 'connect')) {
-        sub.unsubscribe(channel).catch(() => {});
-        sub.removeListener('message', onMessage);
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      if (timeoutTimer) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = null;
+      }
+      const set = activeWaiters.get(token);
+      if (set) {
+        set.delete(finish);
+        if (set.size === 0) {
+          activeWaiters.delete(token);
+          if (sub && (sub.status === 'ready' || sub.status === 'connect')) {
+            sub.unsubscribe(channel).catch(() => {});
+          }
+        }
       }
     };
 
@@ -196,23 +244,37 @@ async function waitForResult(token, maxWait = 15000) {
       resolve(result);
     };
 
-    const onMessage = (ch, message) => {
-      if (ch === channel) {
-        try {
-          const parsed = JSON.parse(message);
-          if (parsed && parsed.status && parsed.status.id > 2) {
-            finish(parsed);
-          }
-        } catch {}
-      }
-    };
+    // 1. Register resolver in activeWaiters Map
+    if (!activeWaiters.has(token)) {
+      activeWaiters.set(token, new Set());
+    }
+    activeWaiters.get(token).add(finish);
 
-    if (sub && (sub.status === 'ready' || sub.status === 'connecting')) {
-      sub.on('message', onMessage);
-      sub.subscribe(channel).catch(() => {});
+    // 2. Subscribe FIRST (await)
+    if (sub && (sub.status === 'ready' || sub.status === 'connecting' || sub.status === 'connect')) {
+      try {
+        await sub.subscribe(channel);
+      } catch (err) {
+        logger.warn({ event: 'pubsub_subscribe_error', channel, error: err.message });
+      }
     }
 
-    // 3. Polling fallback every 100ms in case pub/sub is unavailable or packet was missed
+    if (resolved) return;
+
+    // 3. Initial check: fast or cached job may already be done
+    try {
+      const initial = await getSubmission(token);
+      if (initial && initial.status && initial.status.id > 2) {
+        finish(initial);
+        return;
+      }
+    } catch (err) {
+      // Ignore error during initial check and proceed to polling fallback
+    }
+
+    if (resolved) return;
+
+    // 4. Polling fallback every 100ms in case pub/sub is unavailable or packet was missed
     pollTimer = setInterval(async () => {
       try {
         const res = await getSubmission(token);
@@ -222,6 +284,8 @@ async function waitForResult(token, maxWait = 15000) {
       } catch {}
     }, 100);
 
+    // 5. Max wait timeout
+    const remainingTime = Math.max(10, cappedMaxWait - (Date.now() - start));
     timeoutTimer = setTimeout(async () => {
       try {
         const finalRes = await getSubmission(token);
@@ -229,7 +293,7 @@ async function waitForResult(token, maxWait = 15000) {
       } catch {
         finish(null);
       }
-    }, Math.max(10, cappedMaxWait - (Date.now() - start)));
+    }, remainingTime);
   });
 }
 
@@ -237,7 +301,7 @@ async function waitForResult(token, maxWait = 15000) {
  * POST /submissions/multi/batch
  * Submit multiple multi-file programs
  */
-router.post('/multi/batch', validateBatchMultiSubmission, async (req, res, next) => {
+router.post('/multi/batch', submissionsRateLimitMiddleware, validateBatchMultiSubmission, async (req, res, next) => {
   try {
     const runs = req.validatedBody.runs || req.validatedBody.submissions;
     const results = [];
@@ -315,7 +379,7 @@ router.post('/multi/batch', validateBatchMultiSubmission, async (req, res, next)
  * POST /submissions/multi
  * Submit a multi-file program
  */
-router.post('/multi', validateMultiSubmission, async (req, res, next) => {
+router.post('/multi', submissionsRateLimitMiddleware, validateMultiSubmission, async (req, res, next) => {
   try {
     const data = req.validatedBody;
     const base64Encoded = req.query.base64_encoded === 'true';
@@ -404,7 +468,7 @@ router.post('/multi', validateMultiSubmission, async (req, res, next) => {
  * POST /submissions/batch
  * Submit multiple single-file programs
  */
-router.post('/batch', validateBatchSubmission, async (req, res, next) => {
+router.post('/batch', submissionsRateLimitMiddleware, validateBatchSubmission, async (req, res, next) => {
   try {
     const submissions = req.validatedBody.runs || req.validatedBody.submissions;
     const base64Encoded = req.query.base64_encoded === 'true';
@@ -514,7 +578,7 @@ router.get('/batch', async (req, res, next) => {
  * POST /submissions
  * Submit a single-file program
  */
-router.post('/', validateSubmission, async (req, res, next) => {
+router.post('/', submissionsRateLimitMiddleware, validateSubmission, async (req, res, next) => {
   try {
     const data = req.validatedBody;
     const base64Encoded = req.query.base64_encoded === 'true';
@@ -633,5 +697,6 @@ router.delete('/:token', async (req, res, next) => {
   }
 });
 
+export { waitForResult, activeWaiters, formatSubmission };
 export default router;
 

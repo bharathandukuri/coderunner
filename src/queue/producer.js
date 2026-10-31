@@ -76,6 +76,14 @@ export function getSubscriberRedis() {
   return subRedis;
 }
 
+export function setSubscriberRedis(sub) {
+  subRedis = sub;
+}
+
+export function setRedis(r) {
+  redis = r;
+}
+
 /**
  * Get submission queue
  */
