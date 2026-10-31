@@ -1,9 +1,9 @@
 apiVersion: 1
 
 providers:
-  - name: 'CodeRunner Dashboards'
+  - name: "CodeRunner Dashboards"
     orgId: 1
-    folder: 'CodeRunner'
+    folder: "CodeRunner"
     type: file
     disableDeletion: false
     updateIntervalSeconds: 10
