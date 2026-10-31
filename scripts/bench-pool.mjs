@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 import Docker from 'dockerode';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
+import { execSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
 import { getLanguageById } from '../src/languages/index.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const docker = new Docker({
   socketPath: process.env.DOCKER_SOCKET || (!process.env.DOCKER_HOST ? '/var/run/docker.sock' : undefined),
@@ -67,6 +75,59 @@ async function getContainerMemory(container) {
   };
 }
 
+async function getCgroupMemoryPeak(container) {
+  try {
+    const exec = await container.exec({
+      Cmd: ['cat', '/sys/fs/cgroup/memory.peak'],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+    const stream = await exec.start({ Detach: false });
+    let output = '';
+    stream.on('data', chunk => { output += chunk.toString(); });
+    await new Promise(r => stream.on('end', r));
+    const clean = output.trim().replace(/[^0-9]/g, '');
+    const bytes = parseInt(clean, 10);
+    if (!isNaN(bytes) && bytes > 0) {
+      return bytes;
+    }
+  } catch {}
+  return 0;
+}
+
+async function getEnvironment(dockerInstance) {
+  let gitCommit = 'unknown';
+  try {
+    gitCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+  } catch {}
+
+  let dockerVersion = 'unknown';
+  let storageDriver = 'unknown';
+  try {
+    const v = await dockerInstance.version();
+    dockerVersion = v.Version || 'unknown';
+    const info = await dockerInstance.info();
+    storageDriver = info.Driver || 'unknown';
+  } catch {}
+
+  const cpus = os.cpus();
+  const cpuModel = cpus && cpus.length > 0 ? cpus[0].model : 'unknown';
+  const cpuCores = cpus ? cpus.length : 0;
+  const totalRamGB = (os.totalmem() / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  const kernelVersion = os.release();
+
+  return {
+    cpuModel,
+    cpuCores,
+    totalRam: totalRamGB,
+    kernelVersion,
+    dockerVersion,
+    storageDriver,
+    gitCommit,
+    date: new Date().toISOString(),
+  };
+}
+
 async function getTmpfsUsage(container) {
   try {
     const exec = await container.exec({
@@ -120,8 +181,10 @@ async function sendApiSubmission(langId, sourceCode, options = {}) {
 
 async function main() {
   console.log(`Starting CodeRunner Pool Benchmark (${ITERATIONS} iterations)...`);
+  const env = await getEnvironment(docker);
   const report = {
     timestamp: new Date().toISOString(),
+    environment: env,
     iterations: ITERATIONS,
     boots: {},
     idleRam: {},
@@ -176,6 +239,7 @@ async function main() {
     process.stdout.write('Running heavy PostgreSQL query (generate_series 1,000,000)... ');
     const { container } = await measureBootTime(8);
     try {
+      const initialMem = await getContainerMemory(container);
       const exec = await container.exec({
         Cmd: ['su-exec', 'runner', 'sh', '-c', 'echo "SELECT count(*) FROM generate_series(1, 1000000);" > /box/bench.sql && node /opt/runner/runner.js /box/bench.sql 15'],
         AttachStdout: true,
@@ -184,7 +248,7 @@ async function main() {
       const stream = await exec.start({ Detach: false });
       stream.resume();
 
-      let peakUsage = 0;
+      let peakUsage = initialMem.rawUsageBytes;
       const pollInterval = setInterval(async () => {
         try {
           const stats = await container.stats({ stream: false });
@@ -192,14 +256,15 @@ async function main() {
             peakUsage = stats.memory_stats.usage;
           }
         } catch {}
-      }, 50);
+      }, 25);
 
       await new Promise(r => stream.on('end', r));
       clearInterval(pollInterval);
 
+      const cgroupPeak = await getCgroupMemoryPeak(container);
       const finalMem = await getContainerMemory(container);
       const tmpfs = await getTmpfsUsage(container);
-      const effectivePeak = Math.max(peakUsage, finalMem.rawUsageBytes);
+      const effectivePeak = Math.max(cgroupPeak, peakUsage, initialMem.rawUsageBytes, finalMem.rawUsageBytes);
 
       report.heavyLoad['PostgreSQL'] = {
         peakRamMB: (effectivePeak / (1024 * 1024)).toFixed(2) + ' MB',
@@ -216,6 +281,7 @@ async function main() {
     process.stdout.write('Running heavy MySQL query (recursive CTE 500,000 rows)... ');
     const { container } = await measureBootTime(9);
     try {
+      const initialMem = await getContainerMemory(container);
       const exec = await container.exec({
         Cmd: ['su-exec', 'runner', 'sh', '-c', 'echo "SET SESSION cte_max_recursion_depth = 600000; WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 500000) SELECT count(*) FROM cte;" > /box/bench.sql && node /opt/runner/runner.js /box/bench.sql 15'],
         AttachStdout: true,
@@ -224,7 +290,7 @@ async function main() {
       const stream = await exec.start({ Detach: false });
       stream.resume();
 
-      let peakUsage = 0;
+      let peakUsage = initialMem.rawUsageBytes;
       const pollInterval = setInterval(async () => {
         try {
           const stats = await container.stats({ stream: false });
@@ -232,14 +298,15 @@ async function main() {
             peakUsage = stats.memory_stats.usage;
           }
         } catch {}
-      }, 50);
+      }, 25);
 
       await new Promise(r => stream.on('end', r));
       clearInterval(pollInterval);
 
+      const cgroupPeak = await getCgroupMemoryPeak(container);
       const finalMem = await getContainerMemory(container);
       const tmpfs = await getTmpfsUsage(container);
-      const effectivePeak = Math.max(peakUsage, finalMem.rawUsageBytes);
+      const effectivePeak = Math.max(cgroupPeak, peakUsage, initialMem.rawUsageBytes, finalMem.rawUsageBytes);
 
       report.heavyLoad['MySQL'] = {
         peakRamMB: (effectivePeak / (1024 * 1024)).toFixed(2) + ' MB',
@@ -283,6 +350,14 @@ async function main() {
   console.log('                 BENCHMARK REPORT                     ');
   console.log('======================================================\n');
 
+  console.log('### Benchmark Environment');
+  console.log(`- CPU: ${env.cpuModel} (${env.cpuCores} cores)`);
+  console.log(`- RAM: ${env.totalRam}`);
+  console.log(`- Kernel: ${env.kernelVersion}`);
+  console.log(`- Docker: ${env.dockerVersion} (Storage Driver: ${env.storageDriver})`);
+  console.log(`- Commit: ${env.gitCommit}`);
+  console.log(`- Date: ${env.date}\n`);
+
   console.log('### Container Boot Times (create + start + await ready)');
   console.table(report.boots);
 
@@ -296,6 +371,14 @@ async function main() {
   for (const [k, v] of Object.entries(report.apiLatency)) {
     console.log(`- ${k}: Warm p50=${v.warm.p50}ms (p95=${v.warm.p95}ms) | Cold avg=${v.cold.avg}ms`);
   }
+
+  const benchDir = path.join(__dirname, '..', 'docs', 'benchmarks');
+  if (!fs.existsSync(benchDir)) {
+    fs.mkdirSync(benchDir, { recursive: true });
+  }
+  const outFile = path.join(benchDir, 'benchmark.json');
+  fs.writeFileSync(outFile, JSON.stringify(report, null, 2) + '\n', 'utf8');
+  console.log(`\nRaw benchmark report written to: ${outFile}`);
 
   console.log('\nJSON Output:');
   console.log(JSON.stringify(report, null, 2));

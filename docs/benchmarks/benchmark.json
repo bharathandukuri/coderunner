@@ -1,0 +1,119 @@
+{
+  "timestamp": "2026-10-31T17:18:49.463Z",
+  "environment": {
+    "cpuModel": "12th Gen Intel(R) Core(TM) i5-12500H",
+    "cpuCores": 16,
+    "totalRam": "15.23 GB",
+    "kernelVersion": "7.2.13-200.fc44.x86_64",
+    "dockerVersion": "29.9.2",
+    "storageDriver": "overlayfs",
+    "gitCommit": "e9329e6338cb68541ed70ecba810bf840c121772",
+    "date": "2026-10-31T17:18:49.463Z"
+  },
+  "iterations": 5,
+  "boots": {
+    "PostgreSQL (16)": {
+      "p50": 331,
+      "p95": 392,
+      "p99": 392,
+      "min": 280,
+      "max": 392,
+      "avg": 330
+    },
+    "MySQL (8.4)": {
+      "p50": 750,
+      "p95": 924,
+      "p99": 924,
+      "min": 706,
+      "max": 924,
+      "avg": 793
+    },
+    "Python (3.8) Cold": {
+      "p50": 127,
+      "p95": 139,
+      "p99": 139,
+      "min": 117,
+      "max": 139,
+      "avg": 126
+    },
+    "Python (3.8) Warm": {
+      "p50": 1,
+      "p95": 2,
+      "p99": 3,
+      "avg": 1,
+      "min": 0,
+      "max": 4
+    }
+  },
+  "idleRam": {
+    "PostgreSQL (16)": "57.81 MB (net) / 57.81 MB (total)",
+    "MySQL (8.4)": "242.02 MB (net) / 242.28 MB (total)",
+    "Python (3.8) Cold": "1.37 MB (net) / 1.37 MB (total)"
+  },
+  "heavyLoad": {
+    "PostgreSQL": {
+      "peakRamMB": "62.97 MB",
+      "tmpfsUsage": "45.12 MB"
+    },
+    "MySQL": {
+      "peakRamMB": "250.43 MB",
+      "tmpfsUsage": "99.61 MB"
+    }
+  },
+  "apiLatency": {
+    "PostgreSQL (16)": {
+      "warm": {
+        "p50": 306,
+        "p95": 308,
+        "p99": 308,
+        "min": 233,
+        "max": 308,
+        "avg": 292
+      },
+      "cold": {
+        "p50": 207,
+        "p95": 307,
+        "p99": 307,
+        "min": 207,
+        "max": 307,
+        "avg": 240
+      }
+    },
+    "MySQL (8.4)": {
+      "warm": {
+        "p50": 305,
+        "p95": 307,
+        "p99": 307,
+        "min": 205,
+        "max": 307,
+        "avg": 285
+      },
+      "cold": {
+        "p50": 308,
+        "p95": 407,
+        "p99": 407,
+        "min": 304,
+        "max": 407,
+        "avg": 340
+      }
+    },
+    "Python (3.8)": {
+      "warm": {
+        "p50": 306,
+        "p95": 308,
+        "p99": 308,
+        "min": 305,
+        "max": 308,
+        "avg": 306
+      },
+      "cold": {
+        "p50": 306,
+        "p95": 307,
+        "p99": 307,
+        "min": 305,
+        "max": 307,
+        "avg": 306
+      }
+    }
+  }
+}
