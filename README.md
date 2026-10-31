@@ -147,7 +147,8 @@ curl -X POST "http://localhost:3000/submissions?wait=true" \
 
 ## Documentation
 
-- [Runner Output Format Contract](docs/output-format-contract.md)
+- [Runner Output Contract & Specification](docs/output-contract.md)
+- [Capacity Planning & Resource Sizing Guide](docs/capacity.md)
 - [API Endpoints & URL Reference](docs/URLS.md)
 - [Product Requirements & Architecture Details](docs/prd.md)
 

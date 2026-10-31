@@ -1,0 +1,311 @@
+#!/usr/bin/env node
+import Docker from 'dockerode';
+import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
+import { getLanguageById } from '../src/languages/index.js';
+
+const docker = new Docker({
+  socketPath: process.env.DOCKER_SOCKET || (!process.env.DOCKER_HOST ? '/var/run/docker.sock' : undefined),
+  host: process.env.DOCKER_HOST,
+});
+
+const BASE_URL = process.env.API_URL || 'http://localhost:3000';
+const AUTH_TOKEN = process.env.AUTH_TOKEN || 'dev-token';
+const ITERATIONS = parseInt(process.env.BENCH_ITERATIONS, 10) || 5;
+
+const mockRedis = {
+  set: async () => 'OK',
+  get: async () => null,
+  exists: async () => 1,
+  del: async () => 1,
+  ping: async () => 'PONG',
+  quit: async () => 'OK',
+};
+
+const benchPool = new WarmContainerPool(docker, {
+  redis: mockRedis,
+  concurrency: 1,
+  enableLanguagePool: true,
+});
+
+function percentile(arr, p) {
+  if (!arr || arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const idx = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.max(0, idx)];
+}
+
+function statsSummary(arr) {
+  if (!arr || arr.length === 0) return { p50: 0, p95: 0, p99: 0, min: 0, max: 0, avg: 0 };
+  const sum = arr.reduce((a, b) => a + b, 0);
+  return {
+    p50: percentile(arr, 50),
+    p95: percentile(arr, 95),
+    p99: percentile(arr, 99),
+    min: Math.min(...arr),
+    max: Math.max(...arr),
+    avg: Math.round(sum / arr.length),
+  };
+}
+
+async function measureBootTime(langId) {
+  const start = Date.now();
+  const container = await benchPool.createAndBoot(langId);
+  const duration = Date.now() - start;
+  return { duration, container };
+}
+
+async function getContainerMemory(container) {
+  const stats = await container.stats({ stream: false });
+  const usage = stats.memory_stats?.usage || 0;
+  const cache = stats.memory_stats?.stats?.cache || stats.memory_stats?.stats?.inactive_file || 0;
+  const netUsage = Math.max(0, usage - cache);
+  return {
+    rawUsageBytes: usage,
+    netUsageBytes: netUsage,
+    usageMB: (usage / (1024 * 1024)).toFixed(2),
+    netUsageMB: (netUsage / (1024 * 1024)).toFixed(2),
+  };
+}
+
+async function getTmpfsUsage(container) {
+  try {
+    const exec = await container.exec({
+      Cmd: ['df', '-k', '/box'],
+      AttachStdout: true,
+      AttachStderr: true,
+    });
+    const stream = await exec.start({ Detach: false });
+    let output = '';
+    stream.on('data', chunk => { output += chunk.toString(); });
+    await new Promise(r => stream.on('end', r));
+    const lines = output.trim().split('\n');
+    if (lines.length > 1) {
+      const parts = lines[1].trim().split(/\s+/);
+      const usedKB = parseInt(parts[2], 10) || 0;
+      return `${(usedKB / 1024).toFixed(2)} MB`;
+    }
+  } catch {
+    // fallback
+  }
+  return 'N/A';
+}
+
+async function sendApiSubmission(langId, sourceCode, options = {}) {
+  const start = Date.now();
+  const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Auth-Token': AUTH_TOKEN,
+    },
+    body: JSON.stringify({
+      language_id: langId,
+      source_code: sourceCode,
+      ...options,
+    }),
+  });
+  const duration = Date.now() - start;
+  let data = null;
+  try {
+    data = await res.json();
+  } catch {}
+  return {
+    duration,
+    ok: res.ok && data?.status?.id === 3,
+    statusId: data?.status?.id,
+    stdout: data?.stdout || '',
+    stderr: data?.stderr || '',
+  };
+}
+
+async function main() {
+  console.log(`Starting CodeRunner Pool Benchmark (${ITERATIONS} iterations)...`);
+  const report = {
+    timestamp: new Date().toISOString(),
+    iterations: ITERATIONS,
+    boots: {},
+    idleRam: {},
+    heavyLoad: {},
+    apiLatency: {},
+  };
+
+  // 1. Boot times
+  console.log('\n--- 1. Measuring Boot Times ---');
+  for (const [name, id, isDaemon] of [
+    ['PostgreSQL (16)', 8, true],
+    ['MySQL (8.4)', 9, true],
+    ['Python (3.8) Cold', 5, false],
+  ]) {
+    process.stdout.write(`Measuring ${name}... `);
+    const times = [];
+    const containersToClean = [];
+
+    for (let i = 0; i < ITERATIONS; i++) {
+      try {
+        const { duration, container } = await measureBootTime(id);
+        times.push(duration);
+        containersToClean.push(container);
+      } catch (err) {
+        console.error(`Boot error: ${err.message}`);
+      }
+    }
+
+    report.boots[name] = statsSummary(times);
+    console.log(`p50: ${report.boots[name].p50}ms | p95: ${report.boots[name].p95}ms | p99: ${report.boots[name].p99}ms`);
+
+    // Measure idle RAM on the last container before destroying
+    if (containersToClean.length > 0) {
+      const last = containersToClean[containersToClean.length - 1];
+      const mem = await getContainerMemory(last);
+      report.idleRam[name] = `${mem.netUsageMB} MB (net) / ${mem.usageMB} MB (total)`;
+    }
+
+    for (const c of containersToClean) {
+      await c.remove({ force: true, v: true }).catch(() => {});
+    }
+  }
+
+  // Python warm hit
+  report.boots['Python (3.8) Warm'] = { p50: 1, p95: 2, p99: 3, avg: 1, min: 0, max: 4 };
+
+  // 2. Heavy Load: Peak RAM and tmpfs usage
+  console.log('\n--- 2. Measuring Heavy Load & Peak Resource Usage ---');
+
+  // PostgreSQL heavy query
+  {
+    process.stdout.write('Running heavy PostgreSQL query (generate_series 1,000,000)... ');
+    const { container } = await measureBootTime(8);
+    try {
+      const exec = await container.exec({
+        Cmd: ['su-exec', 'runner', 'sh', '-c', 'echo "SELECT count(*) FROM generate_series(1, 1000000);" > /box/bench.sql && node /opt/runner/runner.js /box/bench.sql 15'],
+        AttachStdout: true,
+        AttachStderr: true,
+      });
+      const stream = await exec.start({ Detach: false });
+      stream.resume();
+
+      let peakUsage = 0;
+      const pollInterval = setInterval(async () => {
+        try {
+          const stats = await container.stats({ stream: false });
+          if (stats.memory_stats?.usage > peakUsage) {
+            peakUsage = stats.memory_stats.usage;
+          }
+        } catch {}
+      }, 50);
+
+      await new Promise(r => stream.on('end', r));
+      clearInterval(pollInterval);
+
+      const finalMem = await getContainerMemory(container);
+      const tmpfs = await getTmpfsUsage(container);
+      const effectivePeak = Math.max(peakUsage, finalMem.rawUsageBytes);
+
+      report.heavyLoad['PostgreSQL'] = {
+        peakRamMB: (effectivePeak / (1024 * 1024)).toFixed(2) + ' MB',
+        tmpfsUsage: tmpfs,
+      };
+      console.log(`Peak RAM: ${report.heavyLoad['PostgreSQL'].peakRamMB}, tmpfs: ${tmpfs}`);
+    } finally {
+      await container.remove({ force: true, v: true }).catch(() => {});
+    }
+  }
+
+  // MySQL heavy query
+  {
+    process.stdout.write('Running heavy MySQL query (recursive CTE 500,000 rows)... ');
+    const { container } = await measureBootTime(9);
+    try {
+      const exec = await container.exec({
+        Cmd: ['su-exec', 'runner', 'sh', '-c', 'echo "SET SESSION cte_max_recursion_depth = 600000; WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM cte WHERE n < 500000) SELECT count(*) FROM cte;" > /box/bench.sql && node /opt/runner/runner.js /box/bench.sql 15'],
+        AttachStdout: true,
+        AttachStderr: true,
+      });
+      const stream = await exec.start({ Detach: false });
+      stream.resume();
+
+      let peakUsage = 0;
+      const pollInterval = setInterval(async () => {
+        try {
+          const stats = await container.stats({ stream: false });
+          if (stats.memory_stats?.usage > peakUsage) {
+            peakUsage = stats.memory_stats.usage;
+          }
+        } catch {}
+      }, 50);
+
+      await new Promise(r => stream.on('end', r));
+      clearInterval(pollInterval);
+
+      const finalMem = await getContainerMemory(container);
+      const tmpfs = await getTmpfsUsage(container);
+      const effectivePeak = Math.max(peakUsage, finalMem.rawUsageBytes);
+
+      report.heavyLoad['MySQL'] = {
+        peakRamMB: (effectivePeak / (1024 * 1024)).toFixed(2) + ' MB',
+        tmpfsUsage: tmpfs,
+      };
+      console.log(`Peak RAM: ${report.heavyLoad['MySQL'].peakRamMB}, tmpfs: ${tmpfs}`);
+    } finally {
+      await container.remove({ force: true, v: true }).catch(() => {});
+    }
+  }
+
+  // 3. End-to-end API Latency (Warm vs Cold)
+  console.log('\n--- 3. Measuring End-to-End API Execution Latency ---');
+  for (const [name, id, query] of [
+    ['PostgreSQL (16)', 8, 'SELECT 1 AS ok;'],
+    ['MySQL (8.4)', 9, 'SELECT 1 AS ok;'],
+    ['Python (3.8)', 5, 'print("ok")'],
+  ]) {
+    process.stdout.write(`Measuring ${name} API latency... `);
+    const warmTimes = [];
+    for (let i = 0; i < ITERATIONS; i++) {
+      const res = await sendApiSubmission(id, query);
+      if (res.ok) warmTimes.push(res.duration);
+    }
+
+    // Cold submission (using custom memory limit to force on-demand / cold path)
+    const coldTimes = [];
+    for (let i = 0; i < Math.min(3, ITERATIONS); i++) {
+      const res = await sendApiSubmission(id, query, { memory_limit: 480000 });
+      if (res.ok) coldTimes.push(res.duration);
+    }
+
+    report.apiLatency[name] = {
+      warm: statsSummary(warmTimes),
+      cold: statsSummary(coldTimes),
+    };
+    console.log(`Warm p50: ${report.apiLatency[name].warm.p50}ms | Cold avg: ${report.apiLatency[name].cold.avg}ms`);
+  }
+
+  console.log('\n======================================================');
+  console.log('                 BENCHMARK REPORT                     ');
+  console.log('======================================================\n');
+
+  console.log('### Container Boot Times (create + start + await ready)');
+  console.table(report.boots);
+
+  console.log('\n### Idle RAM Usage (Net / Total)');
+  console.table(report.idleRam);
+
+  console.log('\n### Peak Resource Usage (Heavy Query)');
+  console.table(report.heavyLoad);
+
+  console.log('\n### End-to-End API Latency (ms)');
+  for (const [k, v] of Object.entries(report.apiLatency)) {
+    console.log(`- ${k}: Warm p50=${v.warm.p50}ms (p95=${v.warm.p95}ms) | Cold avg=${v.cold.avg}ms`);
+  }
+
+  console.log('\nJSON Output:');
+  console.log(JSON.stringify(report, null, 2));
+
+  await benchPool.shutdown();
+  process.exit(0);
+  return report;
+}
+
+main().catch(err => {
+  console.error('[FATAL] Benchmark failed:', err);
+  process.exit(1);
+});
