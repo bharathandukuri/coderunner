@@ -606,7 +606,7 @@ describe('CodeRunner API', () => {
         method: 'POST',
         headers,
         body: JSON.stringify({
-          source_code: 'WITH RECURSIVE loop AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM loop) SELECT * FROM loop;',
+          source_code: 'WITH RECURSIVE loop AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM loop) SELECT count(*) FROM loop;',
           language_id: 8,
           time_limit: 1,
         }),
@@ -711,6 +711,10 @@ describe('CodeRunner API', () => {
       const results = await Promise.all(burst);
       assert.strictEqual(results.length, 20);
       for (let i = 0; i < 20; i++) {
+        if (!results[i] || !results[i].status) {
+          console.error(`Burst item ${i} unexpected response:`, results[i]);
+        }
+        assert(results[i] && results[i].status, `Burst item ${i} missing status`);
         assert.strictEqual(results[i].status.id, 3);
         assert(results[i].stdout.includes(String(i)));
       }
