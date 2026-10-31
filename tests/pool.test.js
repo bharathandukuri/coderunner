@@ -823,5 +823,132 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
     await pool.shutdown();
   });
+
+  it('25. Waiter handoff robustness (Issue 1): settled/timed-out waiter does not lose container', async () => {
+    let bootsCount = 0;
+    let destroyedCount = 0;
+
+    const mockDocker = createMockDocker();
+    mockDocker.createContainer = async (config) => {
+      bootsCount++;
+      const id = `handoff-test-${bootsCount}`;
+      return {
+        id,
+        Id: id,
+        opts: config,
+        running: true,
+        start: async () => {},
+        remove: async () => {
+          destroyedCount++;
+          return { id };
+        },
+        inspect: async () => ({ State: { Running: true } }),
+        exec: async () => ({
+          start: (opts, cb) => {
+            const s = new MockStream();
+            setImmediate(() => { cb(null, s); setImmediate(() => s.emit('end')); });
+          },
+          inspect: async () => ({ ExitCode: 0 }),
+        }),
+      };
+    };
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      postgresPoolSize: 1,
+      mysqlPoolSize: 1,
+      maxWaiters: 10,
+      acquireTimeoutMs: 100,
+    });
+
+    // Wait for initial constructor replenishment to finish settling
+    await new Promise(r => setTimeout(r, 20));
+
+    const pgPool = pool.pools[8];
+    // Drain pool so acquire enters waiter queue
+    pgPool.available = [];
+    pgPool.activeBoots = 0;
+    bootsCount = 0;
+    destroyedCount = 0;
+
+    // Queue a waiter manually without auto-replenish race
+    let settled = false;
+    let queuedWaiter = null;
+    const acquirePromise = new Promise((resolve, reject) => {
+      queuedWaiter = {
+        resolve: (c) => {
+          if (settled) return false;
+          settled = true;
+          resolve(c);
+          return true;
+        },
+        reject: (err) => {
+          if (settled) return false;
+          settled = true;
+          reject(err);
+          return true;
+        },
+      };
+      pgPool.waiters.push(queuedWaiter);
+    });
+    assert.strictEqual(pgPool.waiters.length, 1);
+
+    // Mark waiter as settled by rejecting it while it remains in queue
+    const rejectRes = queuedWaiter.reject(new Error('Pre-settled reject test'));
+    assert.strictEqual(rejectRes, true);
+
+    await assert.rejects(acquirePromise, { message: 'Pre-settled reject test' });
+    // Still in waiters array prior to replenishment handoff attempt
+    assert.strictEqual(pgPool.waiters.length, 1);
+
+    // Now complete replenish for postgres
+    await pool.replenish(8);
+
+    // Assert the booted container was not lost or dropped: it should be in available
+    assert.strictEqual(pgPool.available.length, 1, 'Container should end up in pool.available since waiter was settled');
+    const handedOffCount = 0;
+    assert.strictEqual(
+      bootsCount,
+      pgPool.available.length + handedOffCount + destroyedCount,
+      `Boots count (${bootsCount}) must equal available (${pgPool.available.length}) + handedOff (${handedOffCount}) + destroyed (${destroyedCount})`
+    );
+
+    // Next test: waiter times out mid-handoff, container given to next waiter or available
+    pgPool.available = [];
+    bootsCount = 0;
+    destroyedCount = 0;
+    let s1 = false;
+    let s2 = false;
+    let w1 = null;
+    let w2 = null;
+    const p1 = new Promise((resolve, reject) => {
+      w1 = {
+        resolve: (c) => { if (s1) return false; s1 = true; resolve(c); return true; },
+        reject: (err) => { if (s1) return false; s1 = true; reject(err); return true; }
+      };
+      pgPool.waiters.push(w1);
+    });
+    const p2 = new Promise((resolve, reject) => {
+      w2 = {
+        resolve: (c) => { if (s2) return false; s2 = true; resolve(c); return true; },
+        reject: (err) => { if (s2) return false; s2 = true; reject(err); return true; }
+      };
+      pgPool.waiters.push(w2);
+    });
+    assert.strictEqual(pgPool.waiters.length, 2);
+
+    // Timeout/settle waiter 1 while in queue
+    w1.reject(new Error('Timed out'));
+    await assert.rejects(p1, { message: 'Timed out' });
+
+    // Replenish: container should be handed to waiter 2 (p2)
+    await pool.replenish(8);
+    const container2 = await p2;
+    assert.ok(container2, 'Second waiter should have received container');
+    assert.strictEqual(container2.id, `handoff-test-1`);
+
+    await pool.release(container2);
+    await pool.shutdown();
+  });
 });
 

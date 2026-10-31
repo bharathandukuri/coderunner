@@ -507,7 +507,7 @@ export class WarmContainerPool {
       }, this.acquireTimeoutMs);
 
       waiter = {
-        resolve: async (container) => {
+        resolve: (container) => {
           if (settled) {
             return false;
           }
@@ -515,15 +515,23 @@ export class WarmContainerPool {
           clearTimeout(timer);
           recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000);
           if (!isDbDaemon && submission) {
-            await this.applyResourceLimits(container, submission, lang);
+            this.applyResourceLimits(container, submission, lang)
+              .then(() => resolve(container))
+              .catch(() => resolve(container));
+          } else {
+            resolve(container);
           }
-          resolve(container);
           return true;
         },
         reject: (err) => {
           if (settled) return false;
           settled = true;
           clearTimeout(timer);
+          const idx = pool.waiters.indexOf(waiter);
+          if (idx !== -1) {
+            pool.waiters.splice(idx, 1);
+            recordPoolWaiters(pool.name, pool.waiters.length);
+          }
           reject(err);
           return true;
         },
