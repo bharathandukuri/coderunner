@@ -4,11 +4,14 @@ import config from './config.js';
 export function createDockerClient(options = {}) {
   if (process.env.DOCKER_HOST) {
     try {
-      const url = new URL(process.env.DOCKER_HOST);
+      // Normalize tcp:// to http:// because docker-modem requires protocol to be 'http' or 'https'
+      const normalizedHost = process.env.DOCKER_HOST.replace(/^tcp:\/\//, 'http://');
+      const url = new URL(normalizedHost);
+      const isHttps = url.protocol === 'https:';
       return new Docker({
         host: url.hostname,
         port: parseInt(url.port, 10) || 2375,
-        protocol: url.protocol.replace(':', ''),
+        protocol: isHttps ? 'https' : 'http',
         ...options,
       });
     } catch {

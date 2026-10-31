@@ -150,7 +150,11 @@ export function recordPoolCircuitState(engine, state) {
 
 export async function metricsHandler(req, res) {
   await updateQueueMetrics();
-  res.set('Content-Type', register.contentType);
+  if (typeof res.set === 'function') {
+    res.set('Content-Type', register.contentType);
+  } else if (typeof res.setHeader === 'function') {
+    res.setHeader('Content-Type', register.contentType);
+  }
   res.end(await register.metrics());
 }
 
