@@ -6,7 +6,7 @@ import logger from '../utils/logger.js';
 import { executeCode } from './jobs/executeCode.js';
 import { executeMultiCode } from './jobs/executeMultiCode.js';
 import { getStatusById } from '../languages/index.js';
-import { getWarmPool } from '../executor/pool/WarmContainerPool.js';
+import { getWarmPool, peekWarmPool } from '../executor/pool/WarmContainerPool.js';
 import { metricsHandler } from '../api/metrics.js';
 
 let redis = null;
@@ -233,11 +233,13 @@ export async function stopWorker() {
     } catch {}
   }
 
-  try {
-    const pool = getWarmPool();
-    await pool.shutdown();
-  } catch (poolErr) {
-    logger.warn({ event: 'pool_shutdown_error', message: poolErr.message });
+  const pool = peekWarmPool();
+  if (pool) {
+    try {
+      await pool.shutdown();
+    } catch (poolErr) {
+      logger.warn({ event: 'pool_shutdown_error', message: poolErr.message });
+    }
   }
 
   if (redis) {

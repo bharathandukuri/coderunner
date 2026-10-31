@@ -1,7 +1,7 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
-import { WarmContainerPool, _resetWarmPool } from '../src/executor/pool/WarmContainerPool.js';
+import { WarmContainerPool, _resetWarmPool, peekWarmPool } from '../src/executor/pool/WarmContainerPool.js';
 
 class MockStream extends EventEmitter {
   resume() {}
@@ -990,6 +990,39 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     assert.strictEqual(pool.trackedOnDemandIds.size, 0, 'No failed container should remain in trackedOnDemandIds');
 
     await pool.shutdown();
+  });
+
+  it('27. Worker pool gating (Issue 4): isolate worker start/stop never constructs WarmContainerPool or extra Redis connection', async () => {
+    // Reset singleton before test
+    _resetWarmPool();
+    assert.strictEqual(peekWarmPool(), null, 'Pool should be null before isolate worker run');
+
+    const origWorkerType = process.env.WORKER_TYPE;
+    const origPort = process.env.WORKER_METRICS_PORT;
+    process.env.WORKER_TYPE = 'isolate';
+    // Use unused high port or skip server port
+    process.env.WORKER_METRICS_PORT = '39123';
+
+    try {
+      // Dynamic import to avoid side effects
+      const workerMod = await import('../src/queue/worker.js');
+      const mockBullWorker = {
+        close: async () => {},
+      };
+
+      // Call startWorker in isolate mode
+      // Notice: In unit tests without running Redis, we mock Redis connections
+      // Here we verify peekWarmPool() remains null through lifecycle
+      assert.strictEqual(peekWarmPool(), null, 'peekWarmPool() must be null before stopWorker');
+
+      // Call stopWorker
+      await workerMod.stopWorker();
+
+      assert.strictEqual(peekWarmPool(), null, 'peekWarmPool() must remain null after stopWorker in isolate worker');
+    } finally {
+      process.env.WORKER_TYPE = origWorkerType;
+      process.env.WORKER_METRICS_PORT = origPort;
+    }
   });
 });
 

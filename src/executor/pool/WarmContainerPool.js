@@ -1003,6 +1003,10 @@ export function getWarmPool(docker, options = {}) {
   return warmPoolInstance;
 }
 
+export function peekWarmPool() {
+  return warmPoolInstance;
+}
+
 export function _resetWarmPool() {
   warmPoolInstance = null;
 }
@@ -1010,6 +1014,7 @@ export function _resetWarmPool() {
 export default {
   WarmContainerPool,
   getWarmPool,
+  peekWarmPool,
   _resetWarmPool,
   getPoolConcurrency,
 };
