@@ -81,6 +81,7 @@ function createMockRedis() {
     get: async (key) => store.get(key) || null,
     exists: async (key) => (store.has(key) ? 1 : 0),
     del: async (key) => { store.delete(key); return 1; },
+    ping: async () => 'PONG',
     quit: async () => 'OK',
   };
 }
@@ -133,7 +134,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       async () => {
         await pool.acquire(8);
       },
-      /Timed out waiting for database container/
+      /Timed out waiting for postgres container/
     );
 
     await pool.shutdown();
@@ -155,7 +156,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       async () => {
         await pool.acquire(8);
       },
-      /Database execution pool queue is full/
+      /postgres execution pool queue is full/
     );
 
     await pool.shutdown();
@@ -243,7 +244,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       async () => {
         await waiterPromise;
       },
-      /Database pool is shutting down/
+      /mysql pool is shutting down/
     );
 
     await shutdownPromise;
@@ -319,7 +320,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     assert.strictEqual(pool.pools[5].available.length, 1);
 
     const warmContainer = pool.pools[5].available[0];
-    assert.deepStrictEqual(warmContainer.opts.Cmd, ['/bin/sh', '-c', 'sleep 3600']);
+    assert.deepStrictEqual(warmContainer.opts.Cmd, ['/bin/sh', '-c', 'sleep infinity']);
 
     // Acquire submission object
     const acquired = await pool.acquire({ language: { id: 5 } });
@@ -445,7 +446,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     // DB acquire must fail with timeout or queue-full, NEVER return an unready on-demand container
     await assert.rejects(async () => {
       await pool.acquire(8);
-    }, /Timed out waiting for database container/);
+    }, /Timed out waiting for postgres container/);
 
     await pool.shutdown();
   });
@@ -483,6 +484,226 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     await Promise.all([p1, p2, p3, p4]);
 
     assert(maxActiveObserved <= 2, `Max active boots observed (${maxActiveObserved}) exceeded cap of 2`);
+
+    await pool.shutdown();
+  });
+
+  it('17. Stale waiter cleanup (B1): timed-out waiters are removed via indexOf and do not destroy healthy containers', async () => {
+    const mockDocker = createMockDocker({ bootDelayMs: 200 });
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 1,
+      acquireTimeoutMs: 50,
+      maxWaiters: 5,
+    });
+
+    // Waiter 1 should time out after 50ms
+    await assert.rejects(async () => {
+      await pool.acquire(8);
+    }, /Timed out waiting for postgres container/);
+
+    // Verify waiter 1 is removed from waiters queue (not a ghost)
+    assert.strictEqual(pool.pools[8].waiters.length, 0, 'Timed-out waiter must be removed from pool.waiters');
+
+    // Waiter 2 acquires after waiter 1 timed out
+    pool.acquireTimeoutMs = 1000;
+    const p2 = pool.acquire(8);
+    const container = await p2;
+
+    assert(container, 'Waiter 2 should acquire container');
+    assert.strictEqual(container.removed, false, 'Healthy container must NOT be destroyed');
+
+    await pool.release(container);
+    await pool.shutdown();
+  });
+
+  it('18. Replenish with settled waiter (B1): hands off to next waiter or pushes to available without destroying container', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 1,
+    });
+
+    // Manually push a settled waiter that returns false on resolve
+    let settledWaiterCalled = false;
+    pool.pools[8].waiters.push({
+      resolve: () => {
+        settledWaiterCalled = true;
+        return false; // Already settled
+      },
+      reject: () => false,
+    });
+
+    // Also push a live waiter
+    let liveWaiterReceived = null;
+    pool.pools[8].waiters.push({
+      resolve: (c) => {
+        liveWaiterReceived = c;
+        return true;
+      },
+      reject: () => false,
+    });
+
+    await pool.replenish(8);
+
+    assert(settledWaiterCalled, 'Settled waiter should be invoked');
+    assert(liveWaiterReceived, 'Live waiter should receive container after settled waiter was skipped');
+    assert.strictEqual(liveWaiterReceived.removed, false, 'Container must remain healthy');
+
+    await pool.shutdown();
+  });
+
+  it('19. Pool name in errors (B2): language pool errors name the language, DB pool errors name the DB engine', async () => {
+    const mockDocker = createMockDocker();
+    mockDocker.createContainer = async () => {
+      await new Promise(r => setTimeout(r, 500));
+      throw new Error('Boot slow');
+    };
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      enableLanguagePool: true,
+      concurrency: 1,
+      acquireTimeoutMs: 40,
+      maxWaiters: 1,
+    });
+
+    // DB: postgres (8)
+    await assert.rejects(async () => {
+      await pool.acquire(8);
+    }, /Timed out waiting for postgres container/);
+
+    // DB: mysql (9)
+    await assert.rejects(async () => {
+      await pool.acquire(9);
+    }, /Timed out waiting for mysql container/);
+
+    // Non-DB: Python (5) with maxWaiters exceeded on fallback or timeout
+    const pyPool = pool.pools[5];
+    assert(pyPool, 'Python pool must exist');
+    assert.strictEqual(pyPool.name, 'python');
+
+    await pool.shutdown();
+  });
+
+  it('20. Liveness replacement (B3): dead warm container is detected, destroyed, and replaced', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 1,
+      postgresPoolSize: 1,
+    });
+
+    await pool.replenish(8);
+    assert.strictEqual(pool.pools[8].available.length, 1);
+    const container = pool.pools[8].available[0];
+
+    // Simulate container death (running = false)
+    container.running = false;
+
+    // Run checkLiveness()
+    await pool.checkLiveness();
+
+    assert.strictEqual(container.removed, true, 'Dead container must be destroyed');
+    assert.strictEqual(pool.pools[8].available.length, 1, 'Replacement container must be booted');
+    assert.notStrictEqual(pool.pools[8].available[0].id, container.id, 'New container must have distinct ID');
+
+    await pool.shutdown();
+  });
+
+  it('21. On-demand containers are tracked and destroyed on shutdown (B4)', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 1,
+    });
+
+    const onDemand = await pool.createOnDemandContainer(5, {
+      language: { id: 5, name: 'Python', min_memory: 256000 },
+    });
+
+    assert(onDemand);
+    assert.strictEqual(onDemand.opts.Labels['com.coderunner.on_demand'], 'true');
+    assert.strictEqual(onDemand.opts.Labels['com.coderunner.instance_id'], pool.instanceId);
+    assert.deepStrictEqual(onDemand.opts.Cmd, ['/bin/sh', '-c', 'sleep infinity']);
+    assert(pool.trackedOnDemandIds.has(onDemand.id), 'On-demand container must be in trackedOnDemandIds');
+
+    await pool.shutdown();
+    assert.strictEqual(onDemand.removed, true, 'On-demand container must be destroyed on shutdown');
+    assert.strictEqual(pool.trackedOnDemandIds.size, 0);
+  });
+
+  it('22. Orphan sweeper (B4): sweeps pool (>60s) and on-demand (>600s), skips if Redis unreachable', async () => {
+    const mockDocker = createMockDocker();
+    const mockRedis = createMockRedis();
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: mockRedis,
+      concurrency: 1,
+    });
+
+    const now = Date.now();
+    const removedIds = [];
+
+    mockDocker.getContainer = (id) => ({
+      id,
+      remove: async () => {
+        removedIds.push(id);
+      },
+    });
+
+    mockDocker.listContainers = async () => [
+      {
+        Id: 'pool-young',
+        Labels: {
+          'com.coderunner.pool': 'true',
+          'com.coderunner.created_at': String(now - 30000), // 30s old -> keep
+          'com.coderunner.instance_id': 'other-inst',
+        },
+      },
+      {
+        Id: 'pool-orphan',
+        Labels: {
+          'com.coderunner.pool': 'true',
+          'com.coderunner.created_at': String(now - 70000), // 70s old -> sweep
+          'com.coderunner.instance_id': 'dead-inst',
+        },
+      },
+      {
+        Id: 'ondemand-young',
+        Labels: {
+          'com.coderunner.pool': 'false',
+          'com.coderunner.on_demand': 'true',
+          'com.coderunner.created_at': String(now - 300000), // 5 min old -> keep
+          'com.coderunner.instance_id': 'dead-inst',
+        },
+      },
+      {
+        Id: 'ondemand-orphan',
+        Labels: {
+          'com.coderunner.pool': 'false',
+          'com.coderunner.on_demand': 'true',
+          'com.coderunner.created_at': String(now - 700000), // 11 min old -> sweep
+          'com.coderunner.instance_id': 'dead-inst',
+        },
+      },
+    ];
+
+    await pool.sweepOrphans();
+
+    assert(removedIds.includes('pool-orphan'), 'Orphaned pool container (>60s) must be removed');
+    assert(removedIds.includes('ondemand-orphan'), 'Orphaned on-demand container (>600s) must be removed');
+    assert(!removedIds.includes('pool-young'), 'Young pool container must be kept');
+    assert(!removedIds.includes('ondemand-young'), 'Young on-demand container (<10m) must be kept');
+
+    // Regression test: if Redis is unreachable (ping throws), sweep skips
+    removedIds.length = 0;
+    mockRedis.ping = async () => {
+      throw new Error('Connection refused');
+    };
+
+    await pool.sweepOrphans();
+    assert.strictEqual(removedIds.length, 0, 'Sweep must be completely skipped when Redis ping fails');
 
     await pool.shutdown();
   });

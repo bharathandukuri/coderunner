@@ -2,6 +2,7 @@ export default {
   id: 9,
   name: 'MySQL (8.4 LTS)',
   category: 'database',
+  is_daemon: true,
   extension: 'sql',
   source_file: 'query.sql',
   image: 'coderunner/mysql:8.4',

@@ -189,7 +189,7 @@ router.post('/multi/batch', validateBatchMultiSubmission, async (req, res, next)
 
     for (const data of runs) {
       const language = getLanguageById(data.language_id);
-      const isDatabase = data.language_id === 7 || data.language_id === 8 || data.language_id === 9;
+      const isDatabase = language?.category === 'database';
       const rootTimeLimit = data.time_limit ?? data.timelimit;
       const defaultMemory = isDatabase ? null : config.execution.defaultMemoryLimit;
 
@@ -267,7 +267,7 @@ router.post('/multi', validateMultiSubmission, async (req, res, next) => {
     const fields = parseFields(req.query.fields);
 
     const language = getLanguageById(data.language_id);
-    const isDatabase = data.language_id === 7 || data.language_id === 8 || data.language_id === 9;
+    const isDatabase = language?.category === 'database';
     const rootTimeLimit = data.time_limit ?? data.timelimit;
     const defaultMemory = isDatabase ? null : config.execution.defaultMemoryLimit;
     const maxTotalWallTime = config.execution.maxTotalWallTimeLimit || 60;
@@ -359,7 +359,7 @@ router.post('/batch', validateBatchSubmission, async (req, res, next) => {
       const sourceCode = decodeIfNeeded(data.source_code, base64Encoded);
       const stdin = decodeIfNeeded(data.stdin, base64Encoded);
       const language = getLanguageById(data.language_id);
-      const isDatabase = data.language_id === 7 || data.language_id === 8 || data.language_id === 9;
+      const isDatabase = language?.category === 'database';
       const { effectiveWall, effectiveCpu } = resolveTimeLimits(data, language);
       const memoryLimit = isDatabase ? null : (data.memory_limit ?? config.execution.defaultMemoryLimit);
 
@@ -468,7 +468,7 @@ router.post('/', validateSubmission, async (req, res, next) => {
     const sourceCode = decodeIfNeeded(data.source_code, base64Encoded);
     const stdin = decodeIfNeeded(data.stdin, base64Encoded);
     const language = getLanguageById(data.language_id);
-    const isDatabase = data.language_id === 7 || data.language_id === 8 || data.language_id === 9;
+    const isDatabase = language?.category === 'database';
     const { effectiveWall, effectiveCpu } = resolveTimeLimits(data, language);
     const memoryLimit = isDatabase ? null : (data.memory_limit ?? config.execution.defaultMemoryLimit);
 

@@ -77,6 +77,7 @@ export class WarmContainerPool {
     this.acquireTimeoutMs = parseInt(process.env.POOL_ACQUIRE_TIMEOUT_MS || options.acquireTimeoutMs || '10000', 10);
 
     this.trackedContainerIds = new Set();
+    this.trackedOnDemandIds = new Set();
     this.inFlightBoots = new Set();
     this.pendingRemovals = new Set();
     this.isShuttingDown = false;
@@ -125,7 +126,7 @@ export class WarmContainerPool {
 
     if (this.enableLanguagePool) {
       const allLangs = getAllLanguages();
-      const nonDbLangs = allLangs.filter(l => l.category !== 'database' && l.id !== 7 && l.id !== 8 && l.id !== 9 && !l.is_archived);
+      const nonDbLangs = allLangs.filter(l => l.category !== 'database' && !l.is_archived);
 
       // Group by image so languages sharing an image share one pool
       const imageGroups = new Map();
@@ -197,6 +198,12 @@ export class WarmContainerPool {
       }, 60000);
       this.sweepTimer.unref();
     }
+
+    // B3: Background liveness check (every 30s)
+    this.livenessTimer = setInterval(() => {
+      this.checkLiveness().catch(() => {});
+    }, 30000);
+    this.livenessTimer.unref();
   }
 
   /**
@@ -293,7 +300,9 @@ export class WarmContainerPool {
   }
 
   /**
-   * Sweep orphaned containers older than 60s without an active Redis heartbeat
+   * Sweep orphaned containers older than threshold without an active Redis heartbeat (B4)
+   * Pool containers: age > 60s
+   * On-demand containers: age > 600s (10 min)
    * If Redis is unreachable, the sweep skips to prevent pruning healthy containers.
    */
   async sweepOrphans() {
@@ -312,12 +321,25 @@ export class WarmContainerPool {
     }
 
     try {
-      const list = await this.docker.listContainers({
+      // Find containers with com.coderunner.instance_id or com.coderunner.pool
+      const listInstance = await this.docker.listContainers({
         all: true,
-        filters: {
-          label: ['com.coderunner.pool=true'],
-        },
-      });
+        filters: { label: ['com.coderunner.instance_id'] },
+      }).catch(() => []);
+      const listPool = await this.docker.listContainers({
+        all: true,
+        filters: { label: ['com.coderunner.pool'] },
+      }).catch(() => []);
+
+      const seen = new Set();
+      const list = [];
+      for (const info of [...(Array.isArray(listInstance) ? listInstance : []), ...(Array.isArray(listPool) ? listPool : [])]) {
+        const id = info.Id || info.id;
+        if (id && !seen.has(id)) {
+          seen.add(id);
+          list.push(info);
+        }
+      }
 
       const now = Date.now();
       for (const info of list) {
@@ -325,11 +347,15 @@ export class WarmContainerPool {
         const createdAt = parseInt(labels['com.coderunner.created_at'] || '0', 10) || (info.Created ? info.Created * 1000 : 0);
         const ageMs = now - createdAt;
 
-        if (ageMs > 60000) {
+        const isPool = labels['com.coderunner.pool'] === 'true';
+        const thresholdMs = isPool ? 60000 : 600000;
+
+        if (ageMs > thresholdMs) {
+          const id = info.Id || info.id;
           const instId = labels['com.coderunner.instance_id'] || labels['com.coderunner.worker_slot'];
           if (!instId) {
-            logger.info({ event: 'sweep_removing_unlabeled_orphan', id: info.Id, ageMs });
-            const c = this.docker.getContainer(info.Id);
+            logger.info({ event: 'sweep_removing_unlabeled_orphan', id, ageMs });
+            const c = this.docker.getContainer(id);
             await c.remove({ force: true, v: true }).catch(() => {});
             continue;
           }
@@ -339,13 +365,13 @@ export class WarmContainerPool {
             const exists = await this.redis.exists(`worker:heartbeat:${instId}`);
             alive = (exists === 1);
           } catch (err) {
-            logger.warn({ event: 'sweep_heartbeat_check_failed', id: info.Id, instId, error: err.message });
+            logger.warn({ event: 'sweep_heartbeat_check_failed', id, instId, error: err.message });
             continue;
           }
 
           if (!alive) {
-            logger.info({ event: 'sweep_removing_orphan', id: info.Id, instId, ageMs });
-            const c = this.docker.getContainer(info.Id);
+            logger.info({ event: 'sweep_removing_orphan', id, instId, ageMs, isPool });
+            const c = this.docker.getContainer(id);
             await c.remove({ force: true, v: true }).catch(() => {});
           }
         }
@@ -360,10 +386,6 @@ export class WarmContainerPool {
    * Accepts either languageId (number) or a submission object.
    */
   async acquire(languageIdOrSubmission) {
-    if (this.isShuttingDown) {
-      throw new Error('Database pool is shutting down');
-    }
-
     let languageId;
     let submission = null;
 
@@ -374,15 +396,22 @@ export class WarmContainerPool {
       languageId = parseInt(languageIdOrSubmission, 10);
     }
 
+    const lang = (submission && submission.language) || getLanguageById(languageId);
     const pool = this.pools[languageId];
-    const isDb = pool ? !!pool.isDaemon : (languageId === 8 || languageId === 9);
 
-    if (isDb && !pool) {
+    if (this.isShuttingDown) {
+      const pName = pool?.name || (lang?.name ? lang.name.toLowerCase() : 'Container');
+      throw new Error(`${pName} pool is shutting down`);
+    }
+
+    const isDbDaemon = pool ? Boolean(pool.isDaemon) : Boolean(lang && lang.category === 'database' && lang.is_daemon);
+
+    if (isDbDaemon && !pool) {
       throw new Error(`No container pool configured for language ${languageId}`);
     }
 
     // A6: On-demand fallback (language containers only)
-    if (!isDb) {
+    if (!isDbDaemon) {
       if (!pool) {
         return await this.createOnDemandContainer(languageId, submission);
       }
@@ -425,7 +454,7 @@ export class WarmContainerPool {
     }
 
     // If a non-db pool became empty after dead containers, fall back to on-demand per A6
-    if (!isDb) {
+    if (!isDbDaemon) {
       this.checkReplenish(languageId);
       return await this.createOnDemandContainer(languageId, submission);
     }
@@ -440,47 +469,51 @@ export class WarmContainerPool {
         recordPoolCircuitState(pool.name, 'half-open');
         logger.info({ event: 'circuit_breaker_half_open_probing', language: pool.name });
       } else {
-        throw new Error(`Database service for ${pool.name} is temporarily degraded (circuit breaker OPEN). Please try again shortly.`);
+        throw new Error(`Execution service for ${pool.name} is temporarily degraded (circuit breaker OPEN). Please try again shortly.`);
       }
     }
 
     // 3. Queue-full Backpressure Protection
     if (pool.waiters.length >= this.maxWaiters) {
-      throw new Error(`Database execution pool queue is full (${pool.waiters.length} waiters). Cannot accept more requests.`);
+      throw new Error(`${pool.name} execution pool queue is full (${pool.waiters.length} waiters). Cannot accept more requests.`);
     }
 
-    // 4. Enqueue waiter with timeout
+    // 4. Enqueue waiter with timeout (B1 fix: object-based waiter and indexOf)
     return new Promise((resolve, reject) => {
       let settled = false;
+      let waiter = null;
 
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
 
-        const idx = pool.waiters.findIndex(w => w.resolve === resolve);
-        if (idx !== -1) {
-          pool.waiters.splice(idx, 1);
-          recordPoolWaiters(pool.name, pool.waiters.length);
+        if (waiter) {
+          const idx = pool.waiters.indexOf(waiter);
+          if (idx !== -1) {
+            pool.waiters.splice(idx, 1);
+            recordPoolWaiters(pool.name, pool.waiters.length);
+          }
         }
-        reject(new Error(`Timed out waiting for database container (${this.acquireTimeoutMs}ms)`));
+        reject(new Error(`Timed out waiting for ${pool.name} container (${this.acquireTimeoutMs}ms)`));
       }, this.acquireTimeoutMs);
 
-      const waiter = {
+      waiter = {
         resolve: (container) => {
           if (settled) {
-            this.destroy(container);
-            return;
+            return false;
           }
           settled = true;
           clearTimeout(timer);
           recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000);
           resolve(container);
+          return true;
         },
         reject: (err) => {
-          if (settled) return;
+          if (settled) return false;
           settled = true;
           clearTimeout(timer);
           reject(err);
+          return true;
         },
       };
 
@@ -508,6 +541,7 @@ export class WarmContainerPool {
     const containerId = container.id || container.Id;
     if (containerId) {
       this.trackedContainerIds.delete(containerId);
+      this.trackedOnDemandIds.delete(containerId);
     }
 
     const removePromise = (async () => {
@@ -524,6 +558,45 @@ export class WarmContainerPool {
     });
 
     return removePromise;
+  }
+
+  /**
+   * Background liveness check: inspects available containers every 30s and replaces dead ones (B3)
+   */
+  async checkLiveness() {
+    if (this.isShuttingDown || !this.docker) return;
+    const uniquePools = new Set(Object.values(this.pools));
+
+    for (const pool of uniquePools) {
+      if (!pool.available || pool.available.length === 0) continue;
+
+      const langId = (pool.languages && pool.languages[0]) || (pool.name === 'postgres' ? 8 : (pool.name === 'mysql' ? 9 : null));
+
+      const candidates = [...pool.available];
+      for (const container of candidates) {
+        let isAlive = false;
+        try {
+          const inspect = await container.inspect();
+          if (inspect && inspect.State && inspect.State.Running) {
+            isAlive = true;
+          }
+        } catch {
+          isAlive = false;
+        }
+
+        if (!isAlive) {
+          const idx = pool.available.indexOf(container);
+          if (idx !== -1) {
+            pool.available.splice(idx, 1);
+            recordPoolDepth(pool.name, pool.available.length);
+          }
+          this.destroy(container);
+          if (langId !== null && !this.isShuttingDown) {
+            await this.replenish(langId).catch(() => {});
+          }
+        }
+      }
+    }
   }
 
   /**
@@ -634,13 +707,19 @@ export class WarmContainerPool {
       this.trackedContainerIds.add(container.id);
     }
 
-    // First-Ready Handoff: deliver to earliest waiting request
-    if (pool.waiters.length > 0) {
+    // First-Ready Handoff: deliver to earliest waiting request (B1)
+    let handedOff = false;
+    while (pool.waiters.length > 0) {
       const waiter = pool.waiters.shift();
       recordPoolWaiters(pool.name, pool.waiters.length);
-      waiter.resolve(container);
-      this.checkReplenish(languageId);
-    } else {
+      if (waiter.resolve(container)) {
+        handedOff = true;
+        this.checkReplenish(languageId);
+        break;
+      }
+    }
+
+    if (!handedOff) {
       pool.available.push(container);
       recordPoolDepth(pool.name, pool.available.length);
     }
@@ -692,7 +771,7 @@ export class WarmContainerPool {
           '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
         };
       } else {
-        containerConfig.Cmd = ['/bin/sh', '-c', 'sleep 3600'];
+        containerConfig.Cmd = ['/bin/sh', '-c', 'sleep infinity'];
         containerConfig.Tty = false;
         containerConfig.OpenStdin = true;
         containerConfig.HostConfig.Tmpfs = {
@@ -734,20 +813,24 @@ export class WarmContainerPool {
     const lang = submission.language || getLanguageById(languageId);
     const { memory_limit, max_processes_and_or_threads, enable_network } = submission;
 
-    const isDatabase = languageId === 7 || languageId === 8 || languageId === 9;
-    const effectiveMemory = isDatabase
+    const isDb = lang ? lang.category === 'database' : false;
+    const effectiveMemory = isDb
       ? 512000
-      : (memory_limit ? Math.max(memory_limit, 256000) : 256000);
+      : (memory_limit ? Math.max(memory_limit, (lang?.min_memory || 256000)) : (lang?.min_memory || 256000));
     const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
 
     const container = await this.docker.createContainer({
       Image: lang ? lang.image : `coderunner/language:${languageId}`,
-      Cmd: ['/bin/sh', '-c', 'sleep 3600'],
+      Cmd: ['/bin/sh', '-c', 'sleep infinity'],
       WorkingDir: '/box',
       NetworkDisabled: !enable_network,
       Labels: {
         'com.coderunner.pool': 'false',
+        'com.coderunner.on_demand': 'true',
+        'com.coderunner.instance_id': this.instanceId,
+        'com.coderunner.worker_slot': this.instanceId,
         'com.coderunner.created_at': Date.now().toString(),
+        'com.coderunner.language': lang ? (lang.name || '').toLowerCase() : String(languageId),
       },
       HostConfig: {
         Memory: effectiveMemory * 1024,
@@ -771,6 +854,9 @@ export class WarmContainerPool {
     });
 
     await container.start();
+    if (container && container.id) {
+      this.trackedOnDemandIds.add(container.id);
+    }
     return container;
   }
 
@@ -826,7 +912,7 @@ export class WarmContainerPool {
     const uniquePools = new Set();
     for (const [idStr, pool] of Object.entries(this.pools)) {
       const languageId = parseInt(idStr, 10);
-      const isDb = pool.isDaemon || languageId === 8 || languageId === 9;
+      const isDb = Boolean(pool.isDaemon);
       if (workerType === 'db' && !isDb) continue;
       if (!uniquePools.has(pool)) {
         uniquePools.add(pool);
@@ -847,6 +933,7 @@ export class WarmContainerPool {
       next();
     }
 
+    if (this.livenessTimer) clearInterval(this.livenessTimer);
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.sweepTimer) clearInterval(this.sweepTimer);
 
@@ -862,7 +949,7 @@ export class WarmContainerPool {
     for (const id of Object.keys(this.pools)) {
       const pool = this.pools[id];
       while (pool.waiters.length > 0) {
-        pool.waiters.shift().reject(new Error('Database pool is shutting down'));
+        pool.waiters.shift().reject(new Error(`${pool.name} pool is shutting down`));
       }
     }
 
@@ -882,6 +969,14 @@ export class WarmContainerPool {
       }
     }
     this.trackedContainerIds.clear();
+
+    // Trigger removal of remaining tracked on-demand containers (B4)
+    for (const containerId of this.trackedOnDemandIds) {
+      if (this.docker && this.docker.getContainer) {
+        this.destroy(this.docker.getContainer(containerId));
+      }
+    }
+    this.trackedOnDemandIds.clear();
 
     // Await all in-flight boots and all pending removals
     await Promise.allSettled([
@@ -917,20 +1012,9 @@ export function _resetWarmPool() {
   warmPoolInstance = null;
 }
 
-// Backward-compatibility aliases
-export const DatabaseContainerPool = WarmContainerPool;
-export const getDatabasePool = getWarmPool;
-export const _resetDatabasePool = _resetWarmPool;
-export const LanguageContainerPool = WarmContainerPool;
-export const getLanguagePool = getWarmPool;
-
 export default {
   WarmContainerPool,
   getWarmPool,
   _resetWarmPool,
-  DatabaseContainerPool,
-  getDatabasePool,
-  _resetDatabasePool,
-  LanguageContainerPool,
-  getLanguagePool,
+  getPoolConcurrency,
 };
