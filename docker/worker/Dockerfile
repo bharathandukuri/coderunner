@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc g++ \
     openjdk-17-jdk-headless \
     python3 \
+    sqlite3 \
     ca-certificates curl gnupg \
     unzip bash time \
     make git pkg-config libcap-dev libsystemd-dev libseccomp-dev \

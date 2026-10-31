@@ -203,9 +203,9 @@ function ensureSharedSubscriberListener(sub) {
 /**
  * Wait for submission result using push-based Redis Pub/Sub with polling fallback
  */
-async function waitForResult(token, maxWait = 15000) {
+async function waitForResult(token, maxWait = 25000) {
   const start = Date.now();
-  const cappedMaxWait = Math.min(maxWait, config.execution.maxWaitTimeout || 15000);
+  const cappedMaxWait = Math.min(maxWait, config.execution.maxWaitTimeout || 25000);
   const sub = getSubscriberRedis();
   const channel = `submission:${token}:done`;
 
