@@ -170,8 +170,19 @@ async function sendApiSubmission(langId, sourceCode, options = {}) {
   try {
     data = await res.json();
   } catch {}
+
+  let serverDuration = null;
+  if (data?.created_at && data?.finished_at) {
+    const s = new Date(data.created_at).getTime();
+    const f = new Date(data.finished_at).getTime();
+    if (!isNaN(s) && !isNaN(f) && f >= s) {
+      serverDuration = f - s;
+    }
+  }
+
   return {
     duration,
+    serverDuration,
     ok: res.ok && data?.status?.id === 3,
     statusId: data?.status?.id,
     stdout: data?.stdout || '',
@@ -345,23 +356,34 @@ async function main() {
   ]) {
     process.stdout.write(`Measuring ${name} API latency... `);
     const warmTimes = [];
+    const warmServerTimes = [];
     for (let i = 0; i < ITERATIONS; i++) {
       const res = await sendApiSubmission(id, query);
-      if (res.ok) warmTimes.push(res.duration);
+      if (res.ok) {
+        warmTimes.push(res.duration);
+        if (res.serverDuration !== null) warmServerTimes.push(res.serverDuration);
+      }
     }
 
     // Cold submission (using custom memory limit to force on-demand / cold path)
     const coldTimes = [];
-    for (let i = 0; i < Math.min(3, ITERATIONS); i++) {
+    const coldServerTimes = [];
+    const coldIterations = Math.min(20, ITERATIONS);
+    for (let i = 0; i < coldIterations; i++) {
       const res = await sendApiSubmission(id, query, { memory_limit: 480000 });
-      if (res.ok) coldTimes.push(res.duration);
+      if (res.ok) {
+        coldTimes.push(res.duration);
+        if (res.serverDuration !== null) coldServerTimes.push(res.serverDuration);
+      }
     }
 
     report.apiLatency[name] = {
       warm: statsSummary(warmTimes),
+      warmServer: statsSummary(warmServerTimes),
       cold: statsSummary(coldTimes),
+      coldServer: statsSummary(coldServerTimes),
     };
-    console.log(`Warm p50: ${report.apiLatency[name].warm.p50}ms | Cold avg: ${report.apiLatency[name].cold.avg}ms`);
+    console.log(`Warm p50: ${report.apiLatency[name].warm.p50}ms (server p50: ${report.apiLatency[name].warmServer.p50}ms) | Cold avg: ${report.apiLatency[name].cold.avg}ms (server avg: ${report.apiLatency[name].coldServer.avg}ms)`);
   }
 
   console.log('\n======================================================');
@@ -387,7 +409,7 @@ async function main() {
 
   console.log('\n### End-to-End API Latency (ms)');
   for (const [k, v] of Object.entries(report.apiLatency)) {
-    console.log(`- ${k}: Warm p50=${v.warm.p50}ms (p95=${v.warm.p95}ms) | Cold avg=${v.cold.avg}ms`);
+    console.log(`- ${k}: Warm p50=${v.warm.p50}ms (server p50=${v.warmServer?.p50 ?? 'N/A'}ms) | Cold avg=${v.cold.avg}ms (server avg=${v.coldServer?.avg ?? 'N/A'}ms)`);
   }
 
   const benchDir = path.join(__dirname, '..', 'docs', 'benchmarks');

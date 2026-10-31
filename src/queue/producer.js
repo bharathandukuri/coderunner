@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 
 // Redis connection
 let redis = null;
+let subRedis = null;
 let submissionQueue = null;
 let dbSubmissionQueue = null;
 
@@ -60,6 +61,19 @@ export async function initializeQueue() {
  */
 export function getRedis() {
   return redis;
+}
+
+/**
+ * Get dedicated Redis subscriber connection for Pub/Sub events
+ */
+export function getSubscriberRedis() {
+  if (!subRedis && redis) {
+    subRedis = redis.duplicate();
+    subRedis.on('error', (err) => {
+      logger.warn({ event: 'sub_redis_error', error: err.message });
+    });
+  }
+  return subRedis;
 }
 
 /**
@@ -231,6 +245,10 @@ export async function closeQueue() {
   if (dbSubmissionQueue) {
     await dbSubmissionQueue.close();
   }
+  if (subRedis) {
+    await subRedis.quit().catch(() => {});
+    subRedis = null;
+  }
   if (redis) {
     await redis.quit();
   }
@@ -240,6 +258,7 @@ export async function closeQueue() {
 export default {
   initializeQueue,
   getRedis,
+  getSubscriberRedis,
   getQueue,
   addSubmission,
   getSubmission,

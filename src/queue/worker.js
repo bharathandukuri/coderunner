@@ -39,14 +39,20 @@ function startMetricsServer() {
 }
 
 /**
- * Update submission result in Redis
+ * Update submission result in Redis and publish completion notification
  */
 async function updateSubmissionResult(token, result) {
+  const payload = JSON.stringify(result);
   await redis.setex(
     `submission:${token}`,
     config.cache.resultTtl,
-    JSON.stringify(result)
+    payload
   );
+  if (result && result.status && result.status.id > 2) {
+    if (redis && typeof redis.publish === 'function') {
+      redis.publish(`submission:${token}:done`, payload).catch(() => {});
+    }
+  }
 }
 
 /**

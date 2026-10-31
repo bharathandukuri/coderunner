@@ -8,7 +8,7 @@ import {
   sanitizeCompilerOptions,
   sanitizeCommandLineArgs,
 } from '../middleware/validation.js';
-import { addSubmission, getSubmission, deleteSubmission } from '../../queue/producer.js';
+import { addSubmission, getSubmission, deleteSubmission, getSubscriberRedis } from '../../queue/producer.js';
 import { getLanguageById, getStatusById } from '../../languages/index.js';
 import { decodeIfNeeded, encodeIfNeeded } from '../../utils/base64.js';
 import config from '../../utils/config.js';
@@ -159,22 +159,78 @@ function resolveTimeLimits(data, language) {
 }
 
 /**
- * Wait for submission result with polling
+ * Wait for submission result using push-based Redis Pub/Sub with polling fallback
  */
 async function waitForResult(token, maxWait = 15000) {
   const start = Date.now();
-  const pollInterval = 100;
   const cappedMaxWait = Math.min(maxWait, config.execution.maxWaitTimeout || 15000);
 
-  while (Date.now() - start < cappedMaxWait) {
-    const result = await getSubmission(token);
-    if (result && result.status && result.status.id > 2) {
-      return result;
-    }
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
+  // 1. Initial check: fast or cached job may already be done
+  const initial = await getSubmission(token);
+  if (initial && initial.status && initial.status.id > 2) {
+    return initial;
   }
 
-  return await getSubmission(token);
+  // 2. Push-based notification wait via Redis Pub/Sub
+  const sub = getSubscriberRedis();
+  const channel = `submission:${token}:done`;
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    let pollTimer = null;
+    let timeoutTimer = null;
+
+    const cleanup = () => {
+      if (pollTimer) clearInterval(pollTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+      if (sub && (sub.status === 'ready' || sub.status === 'connect')) {
+        sub.unsubscribe(channel).catch(() => {});
+        sub.removeListener('message', onMessage);
+      }
+    };
+
+    const finish = (result) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(result);
+    };
+
+    const onMessage = (ch, message) => {
+      if (ch === channel) {
+        try {
+          const parsed = JSON.parse(message);
+          if (parsed && parsed.status && parsed.status.id > 2) {
+            finish(parsed);
+          }
+        } catch {}
+      }
+    };
+
+    if (sub && (sub.status === 'ready' || sub.status === 'connecting')) {
+      sub.on('message', onMessage);
+      sub.subscribe(channel).catch(() => {});
+    }
+
+    // 3. Polling fallback every 100ms in case pub/sub is unavailable or packet was missed
+    pollTimer = setInterval(async () => {
+      try {
+        const res = await getSubmission(token);
+        if (res && res.status && res.status.id > 2) {
+          finish(res);
+        }
+      } catch {}
+    }, 100);
+
+    timeoutTimer = setTimeout(async () => {
+      try {
+        const finalRes = await getSubmission(token);
+        finish(finalRes);
+      } catch {
+        finish(null);
+      }
+    }, Math.max(10, cappedMaxWait - (Date.now() - start)));
+  });
 }
 
 /**
