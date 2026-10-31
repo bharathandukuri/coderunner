@@ -1,5 +1,6 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs');
+const { splitMySQLStatements } = require('./splitter.js');
 
 const MAX_OUTPUT_BYTES = 1024 * 1024; // 1MB limit
 const OVERFLOW_MARKER = '\n[Output limit of 1MB exceeded]\n';
@@ -13,18 +14,22 @@ function capOutput(output) {
   return buf.toString('utf8') + OVERFLOW_MARKER;
 }
 
+/**
+ * Format table matching output contract:
+ * - Header always printed, even for 0 rows
+ * - NULL printed as NULL
+ * - Values printed exactly as returned (no 50-char cell truncation, D1)
+ * - Space padding between columns
+ */
 function formatTable(colNames, rows) {
   if (!colNames || colNames.length === 0) return '';
 
   const colWidths = colNames.map(name => (name ? String(name).length : 0));
 
-  const stringRows = rows.map(row => {
+  const stringRows = (rows || []).map(row => {
     return colNames.map((_, idx) => {
       const val = row[idx];
-      let strVal = (val === null || val === undefined) ? 'NULL' : (val instanceof Date ? val.toISOString() : String(val));
-      if (strVal.length > 50) {
-        strVal = strVal.slice(0, 50); // Consistent cell truncation
-      }
+      const strVal = (val === null || val === undefined) ? 'NULL' : String(val);
       if (strVal.length > colWidths[idx]) {
         colWidths[idx] = strVal.length;
       }
@@ -45,145 +50,83 @@ function formatTable(colNames, rows) {
 }
 
 /**
- * Split MySQL script into discrete statements, supporting DELIMITER directives,
- * stored procedures, functions, triggers, and string/comment literals.
+ * Execute a SELECT-like statement using streaming query to bound memory consumption (D5)
  */
-function splitStatements(sql) {
-  const statements = [];
-  let currentDelimiter = ';';
-  let buffer = '';
-  let inSingleQuote = false;
-  let inDoubleQuote = false;
-  let inBacktick = false;
-  let inBlockComment = false;
+async function executeStreamingQuery(connection, stmt) {
+  return new Promise((resolve, reject) => {
+    let colNames = null;
+    const collectedRows = [];
+    let approxBytes = 0;
+    let hitLimit = false;
 
-  const lines = sql.split(/\r?\n/);
+    // Use underlying connection for streaming query
+    const rawConn = connection.connection || connection;
+    const query = rawConn.query({
+      sql: stmt,
+      rowsAsArray: true,
+    });
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!inSingleQuote && !inDoubleQuote && !inBacktick && !inBlockComment) {
-      const match = trimmed.match(/^DELIMITER\s+(.+)$/i);
-      if (match) {
-        if (buffer.trim()) {
-          statements.push(buffer.trim());
-          buffer = '';
-        }
-        currentDelimiter = match[1].trim();
-        continue;
+    const stream = query.stream({ highWaterMark: 128 });
+
+    stream.on('fields', (fields) => {
+      if (fields && fields.length > 0) {
+        colNames = fields.map(f => f.name);
       }
-    }
+    });
 
-    let i = 0;
-    while (i < line.length) {
-      const ch = line[i];
-      const nextCh = line[i + 1] || '';
+    stream.on('data', (row) => {
+      if (hitLimit) return;
 
-      if (inBlockComment) {
-        if (ch === '*' && nextCh === '/') {
-          inBlockComment = false;
-          buffer += '*/';
-          i += 2;
-          continue;
-        }
-        buffer += ch;
-        i++;
-        continue;
+      collectedRows.push(row);
+      for (const cell of (Array.isArray(row) ? row : [])) {
+        approxBytes += cell != null ? String(cell).length : 4;
       }
 
-      if (!inSingleQuote && !inDoubleQuote && !inBacktick) {
-        if (ch === '/' && nextCh === '*') {
-          inBlockComment = true;
-          buffer += '/*';
-          i += 2;
-          continue;
-        }
-        if ((ch === '-' && nextCh === '-' && (line[i + 2] === ' ' || line[i + 2] === '\t' || i + 2 >= line.length)) || ch === '#') {
-          buffer += line.slice(i);
-          break;
-        }
+      if (approxBytes >= MAX_OUTPUT_BYTES) {
+        hitLimit = true;
+        stream.destroy();
+        resolve(formatTable(colNames || [], collectedRows));
       }
+    });
 
-      if (ch === '\\' && (inSingleQuote || inDoubleQuote)) {
-        buffer += ch + nextCh;
-        i += 2;
-        continue;
+    stream.on('end', () => {
+      if (!hitLimit) {
+        resolve(formatTable(colNames || [], collectedRows));
       }
+    });
 
-      if (ch === "'" && !inDoubleQuote && !inBacktick) {
-        inSingleQuote = !inSingleQuote;
-        buffer += ch;
-        i++;
-        continue;
-      }
-
-      if (ch === '"' && !inSingleQuote && !inBacktick) {
-        inDoubleQuote = !inDoubleQuote;
-        buffer += ch;
-        i++;
-        continue;
-      }
-
-      if (ch === '`' && !inSingleQuote && !inDoubleQuote) {
-        inBacktick = !inBacktick;
-        buffer += ch;
-        i++;
-        continue;
-      }
-
-      if (!inSingleQuote && !inDoubleQuote && !inBacktick) {
-        if (line.startsWith(currentDelimiter, i)) {
-          const stmt = buffer.trim();
-          if (stmt) {
-            statements.push(stmt);
-          }
-          buffer = '';
-          i += currentDelimiter.length;
-          continue;
-        }
-      }
-
-      buffer += ch;
-      i++;
-    }
-
-    buffer += '\n';
-  }
-
-  if (buffer.trim()) {
-    statements.push(buffer.trim());
-  }
-
-  return statements;
+    stream.on('error', (err) => {
+      if (hitLimit) return;
+      reject(err);
+    });
+  });
 }
 
-function processResult(rawResults, rawFields) {
-  let out = '';
-  const isMulti = Array.isArray(rawResults) && (
-    (rawResults.length > 0 && rawResults[0]?.constructor?.name === 'ResultSetHeader') ||
-    (Array.isArray(rawFields) && rawFields.length > 0 && Array.isArray(rawFields[0]))
-  );
+/**
+ * Execute a single statement and return its formatted text output
+ */
+async function executeSingleStatement(connection, stmt) {
+  const trimmed = stmt.trim();
+  const isSelectLike = /^\s*(SELECT|WITH|SHOW|DESCRIBE|EXPLAIN)\b/i.test(trimmed);
 
-  if (isMulti) {
-    for (let i = 0; i < rawResults.length; i++) {
-      const stmtResult = rawResults[i];
-      const stmtFields = rawFields ? rawFields[i] : null;
-
-      if (Array.isArray(stmtResult)) {
-        const colNames = (stmtFields || []).map(f => f.name);
-        out += formatTable(colNames, stmtResult);
-      } else if (stmtResult && stmtResult.affectedRows !== undefined) {
-        out += `Query OK, ${stmtResult.affectedRows} row${stmtResult.affectedRows === 1 ? '' : 's'} affected\n`;
-      }
-    }
-  } else {
-    if (Array.isArray(rawResults)) {
-      const colNames = (rawFields || []).map(f => f.name);
-      out += formatTable(colNames, rawResults);
-    } else if (rawResults && rawResults.affectedRows !== undefined) {
-      out += `Query OK, ${rawResults.affectedRows} row${rawResults.affectedRows === 1 ? '' : 's'} affected\n`;
+  if (isSelectLike) {
+    try {
+      return await executeStreamingQuery(connection, stmt);
+    } catch (err) {
+      // Fallback to standard query if streaming fails on custom syntax
     }
   }
-  return out;
+
+  const [rawResults, rawFields] = await connection.query({ sql: stmt, rowsAsArray: true });
+
+  if (Array.isArray(rawResults)) {
+    const colNames = (rawFields || []).map(f => f.name);
+    return formatTable(colNames, rawResults);
+  } else if (rawResults && rawResults.affectedRows !== undefined) {
+    return `Query OK, ${rawResults.affectedRows} row${rawResults.affectedRows === 1 ? '' : 's'} affected\n`;
+  }
+
+  return '';
 }
 
 async function main() {
@@ -204,7 +147,7 @@ async function main() {
 
   const timeoutMs = Math.max(Math.floor(timeoutSecs * 1000), 500);
 
-  // Host/runner wall-clock watchdog (exit code 124 on timeout)
+  // Host/runner wall-clock watchdog (exit code 124 on timeout) (D6)
   const wallTimer = setTimeout(() => {
     process.stderr.write('canceling statement due to statement timeout\n', () => {
       process.exit(124);
@@ -212,52 +155,76 @@ async function main() {
   }, timeoutMs);
 
   let connection = null;
+  const connectionConfig = {
+    user: 'runner',
+    password: process.env.DB_PASSWORD || 'coderunner_runner_secret',
+    database: process.env.DB_NAME || 'coderunner',
+    socketPath: '/box/socket/mysqld.sock',
+    multipleStatements: false,
+    rowsAsArray: true,
+    connectTimeout: 1500,
+    // D3: big numbers, big number strings, date strings, and raw typeCast
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    dateStrings: true,
+    typeCast: function (field, next) {
+      if (['JSON', 'BLOB', 'BIT', 'DECIMAL', 'NEWDECIMAL', 'GEOMETRY', 'TINY_BLOB', 'MEDIUM_BLOB', 'LONG_BLOB'].includes(field.type)) {
+        return field.string();
+      }
+      return next();
+    },
+  };
 
   try {
     try {
-      connection = await mysql.createConnection({
-        user: 'runner',
-        password: process.env.DB_PASSWORD || 'coderunner_runner_secret',
-        database: process.env.DB_NAME || 'coderunner',
-        socketPath: '/box/socket/mysqld.sock',
-        multipleStatements: true,
-        rowsAsArray: true,
-        connectTimeout: 1500,
-        dateStrings: true,
-      });
+      connection = await mysql.createConnection(connectionConfig);
     } catch {
-      connection = await mysql.createConnection({
-        user: 'runner',
-        password: process.env.DB_PASSWORD || 'coderunner_runner_secret',
-        database: process.env.DB_NAME || 'coderunner',
-        socketPath: '/box/socket/mysqld.sock',
-        multipleStatements: true,
-        rowsAsArray: true,
-        connectTimeout: 3000,
-        dateStrings: true,
-      });
+      connectionConfig.connectTimeout = 3000;
+      connection = await mysql.createConnection(connectionConfig);
     }
 
     // Set MySQL execution timeout for SELECT statements
     await connection.query(`SET SESSION max_execution_time = ${timeoutMs};`);
 
+    // D4: Sequential statement execution via splitMySQLStatements
+    const statements = splitMySQLStatements(sql);
     let output = '';
-    const hasDelimiter = /\bDELIMITER\s+/i.test(sql);
 
-    if (hasDelimiter) {
-      const statements = splitStatements(sql);
-      for (const stmt of statements) {
-        if (!stmt.trim()) continue;
-        const [rawResults, rawFields] = await connection.query({ sql: stmt, rowsAsArray: true });
-        output += processResult(rawResults, rawFields);
+    for (const stmt of statements) {
+      if (!stmt.trim()) continue;
 
-        if (Buffer.byteLength(output, 'utf8') > MAX_OUTPUT_BYTES) {
+      try {
+        const stmtOutput = await executeSingleStatement(connection, stmt);
+        output += stmtOutput;
+
+        if (Buffer.byteLength(output, 'utf8') >= MAX_OUTPUT_BYTES) {
           break;
         }
+      } catch (stmtErr) {
+        clearTimeout(wallTimer);
+        if (connection) {
+          await connection.end().catch(() => {});
+        }
+
+        // Multi-statement contract: STOP AT FIRST ERROR;
+        // stdout contains output of all statements before the error, stderr contains the error, exit 1
+        if (output) {
+          process.stdout.write(capOutput(output));
+        }
+
+        // ER_QUERY_TIMEOUT (code 3024) or ER_STATEMENT_TIMEOUT (code 1907)
+        if (stmtErr.errno === 3024 || stmtErr.errno === 1907 || stmtErr.code === 'PROTOCOL_TIMEOUT' || stmtErr.message?.includes('exceeded') || stmtErr.message?.includes('statement timeout')) {
+          process.stderr.write('canceling statement due to statement timeout\n', () => {
+            process.exit(124);
+          });
+          return;
+        }
+
+        process.stderr.write(`ERROR: ${stmtErr.message}\n`, () => {
+          process.exit(1);
+        });
+        return;
       }
-    } else {
-      const [rawResults, rawFields] = await connection.query({ sql, rowsAsArray: true });
-      output = processResult(rawResults, rawFields);
     }
 
     clearTimeout(wallTimer);
@@ -272,8 +239,7 @@ async function main() {
       await connection.end().catch(() => {});
     }
 
-    // ER_QUERY_TIMEOUT (code 3024) or ER_STATEMENT_TIMEOUT (code 1907)
-    if (err.errno === 3024 || err.errno === 1907 || err.code === 'PROTOCOL_TIMEOUT' || err.message?.includes('exceeded')) {
+    if (err.errno === 3024 || err.errno === 1907 || err.code === 'PROTOCOL_TIMEOUT' || err.message?.includes('exceeded') || err.message?.includes('statement timeout')) {
       process.stderr.write('canceling statement due to statement timeout\n', () => {
         process.exit(124);
       });

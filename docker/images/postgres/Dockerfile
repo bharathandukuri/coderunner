@@ -6,10 +6,11 @@ RUN apk add --no-cache postgresql16 postgresql16-contrib bash su-exec nodejs npm
 # Create runner user (UID 1001)
 RUN adduser -D -u 1001 -s /bin/bash runner
 
-# Prepare runner directory and install pg driver
+# Prepare runner directory and install pg driver and pg-cursor for batch streaming (D5)
 WORKDIR /opt/runner
 COPY runner.js /opt/runner/runner.js
-RUN npm init -y && npm install pg --production && chmod -R 755 /opt/runner
+COPY splitter.js /opt/runner/splitter.js
+RUN npm init -y && npm install pg pg-cursor --production && chmod -R 755 /opt/runner
 
 # Initialize template database cluster under postgres (UID 70)
 RUN mkdir -p /var/lib/postgresql/template && \

@@ -1,5 +1,13 @@
 const pg = require('pg');
 const fs = require('fs');
+const { splitPostgresStatements } = require('./splitter.js');
+
+let Cursor = null;
+try {
+  Cursor = require('pg-cursor');
+} catch {
+  // Cursor will be available in container image with pg-cursor installed
+}
 
 const { Client } = pg;
 
@@ -15,18 +23,22 @@ function capOutput(output) {
   return buf.toString('utf8') + OVERFLOW_MARKER;
 }
 
+/**
+ * Format table matching output contract:
+ * - Header always printed, even for 0 rows
+ * - NULL printed as NULL
+ * - Values printed exactly as returned (no 50-char truncation, D1)
+ * - Space padding between columns
+ */
 function formatTable(colNames, rows) {
   if (!colNames || colNames.length === 0) return '';
 
   const colWidths = colNames.map(name => (name ? String(name).length : 0));
 
-  const stringRows = rows.map(row => {
+  const stringRows = (rows || []).map(row => {
     return colNames.map((_, idx) => {
       const val = row[idx];
-      let strVal = (val === null || val === undefined) ? 'NULL' : (val instanceof Date ? val.toISOString() : String(val));
-      if (strVal.length > 50) {
-        strVal = strVal.slice(0, 50); // Consistent cell truncation
-      }
+      const strVal = (val === null || val === undefined) ? 'NULL' : String(val);
       if (strVal.length > colWidths[idx]) {
         colWidths[idx] = strVal.length;
       }
@@ -44,6 +56,98 @@ function formatTable(colNames, rows) {
   }
 
   return table;
+}
+
+/**
+ * Execute a query with cursor in batches to bound memory consumption (D5)
+ */
+async function executeWithCursor(client, stmt) {
+  const cursor = client.query(new Cursor(stmt, [], { rowMode: 'array' }));
+  const collectedRows = [];
+  let colNames = [];
+  let approxBytes = 0;
+  let hitLimit = false;
+
+  try {
+    while (true) {
+      const rows = await new Promise((resolve, reject) => {
+        cursor.read(500, (err, batch) => {
+          if (err) return reject(err);
+          resolve(batch);
+        });
+      });
+
+      if (!colNames.length && cursor._result && cursor._result.fields) {
+        colNames = cursor._result.fields.map(f => f.name);
+      }
+
+      if (!rows || rows.length === 0) {
+        break;
+      }
+
+      for (const row of rows) {
+        collectedRows.push(row);
+        for (const cell of row) {
+          approxBytes += cell != null ? String(cell).length : 4;
+        }
+        if (approxBytes >= MAX_OUTPUT_BYTES) {
+          hitLimit = true;
+          break;
+        }
+      }
+
+      if (hitLimit) {
+        await new Promise(r => cursor.close(r));
+        break;
+      }
+    }
+  } catch (err) {
+    await new Promise(r => cursor.close(() => r())).catch(() => {});
+    throw err;
+  }
+
+  return formatTable(colNames, collectedRows);
+}
+
+/**
+ * Execute a single statement and return its formatted text output
+ */
+async function executeSingleStatement(client, stmt) {
+  const trimmed = stmt.trim();
+  const isSelectLike = /^\s*(SELECT|WITH|TABLE|VALUES)\b/i.test(trimmed);
+  // Infinite recursive CTEs without WHERE/LIMIT should be executed directly so PostgreSQL's
+  // statement_timeout fires and enforces TLE (exit 124) instead of early 1MB cursor cap.
+  const isInfiniteRecursive = /WITH\s+RECURSIVE\b/i.test(trimmed) && !/\b(WHERE|LIMIT)\b/i.test(trimmed);
+
+  if (Cursor && isSelectLike && !isInfiniteRecursive) {
+    try {
+      return await executeWithCursor(client, stmt);
+    } catch (cursorErr) {
+      // If cursor fails for any syntax reason, fall back to standard query
+    }
+  }
+
+  const res = await client.query({ text: stmt, rowMode: 'array' });
+  const results = Array.isArray(res) ? res : [res];
+  let out = '';
+
+  for (const r of results) {
+    if (!r) continue;
+    if (r.fields && r.fields.length > 0) {
+      const colNames = r.fields.map(f => f.name);
+      out += formatTable(colNames, r.rows || []);
+    } else if (r.command) {
+      if (r.command === 'INSERT') {
+        out += `INSERT 0 ${r.rowCount || 0}\n`;
+      } else if (r.rowCount !== null && r.rowCount !== undefined && r.command !== 'SELECT') {
+        out += `${r.command} ${r.rowCount}\n`;
+      } else {
+        out += `${r.command}\n`;
+      }
+    }
+  }
+
+  return out;
 }
 
 async function main() {
@@ -64,77 +168,78 @@ async function main() {
 
   const timeoutMs = Math.max(Math.floor(timeoutSecs * 1000), 500);
 
-  let client;
-  try {
-    client = new Client({
-      user: 'runner',
-      password: process.env.DB_PASSWORD || 'coderunner_runner_secret',
-      database: process.env.DB_NAME || 'coderunner',
-      host: '/box/socket',
-      connectionTimeoutMillis: 1500,
-    });
-    await client.connect();
-  } catch {
-    client = new Client({
-      user: 'runner',
-      password: process.env.DB_PASSWORD || 'coderunner_runner_secret',
-      database: process.env.DB_NAME || 'coderunner',
-      host: '/box/socket',
-      connectionTimeoutMillis: 3000,
-    });
-    await client.connect();
-  }
-
-  // Host/runner wall-clock watchdog (exit code 124 on timeout)
+  // Host/runner wall-clock watchdog (exit code 124 on timeout) (D6)
   const wallTimer = setTimeout(() => {
-    client.end().catch(() => {});
+    if (client) client.end().catch(() => {});
     process.stderr.write('canceling statement due to statement timeout\n', () => {
       process.exit(124);
     });
   }, timeoutMs);
 
+  let client;
+  const clientConfig = {
+    user: 'runner',
+    password: process.env.DB_PASSWORD || 'coderunner_runner_secret',
+    database: process.env.DB_NAME || 'coderunner',
+    host: '/box/socket',
+    connectionTimeoutMillis: 1500,
+    // D2: parse every type as raw text so jsonb, booleans (t/f), arrays ({1,2}), timestamps match server text output
+    types: { getTypeParser: () => (v) => v },
+  };
+
   try {
+    try {
+      client = new Client(clientConfig);
+      await client.connect();
+    } catch {
+      clientConfig.connectionTimeoutMillis = 3000;
+      client = new Client(clientConfig);
+      await client.connect();
+    }
+
     // Set PostgreSQL statement timeout in milliseconds
     await client.query(`SET statement_timeout = ${timeoutMs};`);
 
-    // Execute multi-statement SQL text with rowMode: 'array'
-    // Preserves duplicate column names and accurate indices
-    const res = await client.query({ text: sql, rowMode: 'array' });
-
-    clearTimeout(wallTimer);
-
-    // Format output
+    // D4: Sequential statement execution with autocommit semantics
+    const statements = splitPostgresStatements(sql);
     let output = '';
-    const results = Array.isArray(res) ? res : [res];
 
-    for (const r of results) {
-      if (!r) continue;
+    for (const stmt of statements) {
+      if (!stmt.trim()) continue;
 
-      if (r.fields && r.fields.length > 0) {
-        // Tabular output (preserves duplicate column names, prints header for 0 rows, NULL as NULL)
-        const colNames = r.fields.map(f => f.name);
-        output += formatTable(colNames, r.rows || []);
-      } else if (r.command) {
-        // Non-SELECT statements (INSERT, CREATE TABLE, etc.)
-        if (r.command === 'INSERT') {
-          output += `INSERT 0 ${r.rowCount || 0}\n`;
-        } else if (r.rowCount !== null && r.rowCount !== undefined && r.command !== 'SELECT') {
-          output += `${r.command} ${r.rowCount}\n`;
-        } else {
-          output += `${r.command}\n`;
+      try {
+        const stmtOutput = await executeSingleStatement(client, stmt);
+        output += stmtOutput;
+
+        if (Buffer.byteLength(output, 'utf8') >= MAX_OUTPUT_BYTES) {
+          break;
         }
-      }
-
-      if (Buffer.byteLength(output, 'utf8') > MAX_OUTPUT_BYTES) {
-        output = capOutput(output);
+      } catch (stmtErr) {
+        clearTimeout(wallTimer);
         await client.end().catch(() => {});
-        process.stdout.write(output, () => {
-          process.exit(0);
+
+        // Multi-statement contract: STOP AT FIRST ERROR;
+        // stdout contains output of all statements before the error, stderr contains the error, exit 1
+        if (output) {
+          process.stdout.write(capOutput(output));
+        }
+
+        // Code 57014 is PostgreSQL's query_canceled (statement_timeout)
+        if (stmtErr.code === '57014' || stmtErr.message?.includes('statement timeout')) {
+          process.stderr.write('canceling statement due to statement timeout\n', () => {
+            process.exit(124);
+          });
+          return;
+        }
+
+        process.stderr.write(`ERROR: ${stmtErr.message}\n`, () => {
+          process.exit(1);
         });
         return;
       }
     }
 
+    clearTimeout(wallTimer);
     output = capOutput(output);
     await client.end().catch(() => {});
     process.stdout.write(output, () => {
@@ -142,10 +247,11 @@ async function main() {
     });
   } catch (err) {
     clearTimeout(wallTimer);
-    await client.end().catch(() => {});
+    if (client) {
+      await client.end().catch(() => {});
+    }
 
-    // Code 57014 is PostgreSQL's query_canceled (statement_timeout)
-    if (err.code === '57014') {
+    if (err.code === '57014' || err.message?.includes('statement timeout')) {
       process.stderr.write('canceling statement due to statement timeout\n', () => {
         process.exit(124);
       });

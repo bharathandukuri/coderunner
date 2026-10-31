@@ -2,6 +2,7 @@ FROM node:20-slim AS runner-builder
 
 WORKDIR /opt/runner
 COPY runner.js /opt/runner/runner.js
+COPY splitter.js /opt/runner/splitter.js
 RUN npm init -y && npm install mysql2 --production && chmod -R 755 /opt/runner
 
 FROM mysql:8.4
