@@ -145,8 +145,43 @@ curl -X POST "http://localhost:3000/submissions?wait=true" \
 
 ---
 
+## Production Deployment & Operations
+
+For complete production guidelines, update steps, rollbacks, and incident response, see the **[Operations Runbook (docs/ops/RUNBOOK.md)](docs/ops/RUNBOOK.md)**.
+
+### Production Automation Scripts
+
+| Script | Purpose |
+|---|---|
+| [`scripts/preflight.sh`](scripts/preflight.sh) | Verifies Docker, cgroup v2, RAM/disk against capacity formulas, firewall isolation, and Isolate/gVisor. |
+| [`scripts/deploy.sh`](scripts/deploy.sh) | Production lifecycle: `init` (.env token generation), `build` (version tagging), `up` (start & health verification), `status`, `logs`, `rollback`, and `down`. |
+| [`scripts/smoke-test.sh`](scripts/smoke-test.sh) | 13-point automated test suite: health, auth, 5 language executions, TLE, push `wait=true`, multi-file, metrics privacy, Grafana, and Prometheus targets. |
+| [`scripts/leak-check.sh`](scripts/leak-check.sh) | Verifies zero leaked pool containers and zero dangling anonymous Docker volumes. |
+| [`scripts/backup.sh`](scripts/backup.sh) | Backs up `.env`, Grafana, and Prometheus volumes with retention management and one-click restore. |
+
+### Quick Production Launch
+```bash
+# 1. Run host preflight checks
+./scripts/preflight.sh --install-isolate
+
+# 2. Initialize environment with secure randomized credentials
+./scripts/deploy.sh init
+
+# 3. Build container images with git commit tagging
+./scripts/deploy.sh build
+
+# 4. Deploy stack and verify health
+./scripts/deploy.sh up
+
+# 5. Run end-to-end smoke verification
+./scripts/smoke-test.sh
+```
+
+---
+
 ## Documentation
 
+- [Operations Runbook & Troubleshooting](docs/ops/RUNBOOK.md)
 - [Runner Output Contract & Specification](docs/output-contract.md)
 - [Capacity Planning & Resource Sizing Guide](docs/capacity.md)
 - [API Endpoints & URL Reference](docs/URLS.md)
