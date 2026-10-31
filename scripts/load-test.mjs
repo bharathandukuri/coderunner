@@ -7,6 +7,8 @@ const AUTH_TOKEN = process.env.AUTH_TOKEN || '';
 const BURST_SIZE = parseInt(process.env.BURST_SIZE || '20', 10);
 const DURATION_SEC = parseInt(process.env.DURATION_SEC || '300', 10);
 const TARGET_RPS = parseFloat(process.env.TARGET_RPS || '1');
+const SKIP_BURST = process.env.SKIP_BURST === 'true';
+const SKIP_SUSTAINED = process.env.SKIP_SUSTAINED === 'true';
 
 if (!AUTH_TOKEN) {
   console.error('Error: AUTH_TOKEN environment variable required');
@@ -185,11 +187,11 @@ async function runSustainedPhase() {
 
 async function main() {
   console.log(`Starting Production Load Test against ${BASE_URL} (Prometheus: ${PROMETHEUS_URL})...`);
-  const burst = await runBurstPhase();
-  const { sustainedResults: sustained, prometheusStats } = await runSustainedPhase();
+  const burst = SKIP_BURST ? null : await runBurstPhase();
+  const sustainedData = SKIP_SUSTAINED ? null : await runSustainedPhase();
 
   console.log('\n=== Load Test Summary ===');
-  console.log(JSON.stringify({ burst, sustained, prometheusStats }, null, 2));
+  console.log(JSON.stringify({ burst, sustained: sustainedData?.sustainedResults, prometheusStats: sustainedData?.prometheusStats }, null, 2));
 }
 
 main().catch(err => {
