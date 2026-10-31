@@ -1,10 +1,10 @@
 import Docker from 'dockerode';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
-import config from '../../utils/config.js';
+import config, { getPoolConcurrency } from '../../utils/config.js';
 import logger from '../../utils/logger.js';
 import { createDockerClient } from '../../utils/dockerClient.js';
-import { getLanguageById } from '../../languages/index.js';
+import { getLanguageById, getAllLanguages } from '../../languages/index.js';
 import {
   recordPoolDepth,
   recordPoolWaiters,
@@ -13,6 +13,8 @@ import {
   recordPoolAcquireWait,
   recordPoolCircuitState,
 } from '../../api/metrics.js';
+
+export { getPoolConcurrency };
 
 export class WarmContainerPool {
   constructor(docker, options = {}) {
@@ -23,11 +25,53 @@ export class WarmContainerPool {
     this.instanceId = options.instanceId || process.env.INSTANCE_ID || `worker-${uuidv4().slice(0, 8)}`;
     this.workerSlotId = this.instanceId;
 
-    const defaultConcurrency = parseInt(process.env.WORKER_CONCURRENCY || options.concurrency || '2', 10);
-    this.postgresPoolSize = parseInt(process.env.POSTGRES_POOL_SIZE || options.postgresPoolSize || defaultConcurrency, 10);
-    this.mysqlPoolSize = parseInt(process.env.MYSQL_POOL_SIZE || options.mysqlPoolSize || defaultConcurrency, 10);
-    this.languagePoolSize = parseInt(process.env.LANGUAGE_POOL_SIZE || options.languagePoolSize || config.docker?.languagePoolSize || '1', 10);
-    this.targetPoolSize = options.poolSize ? parseInt(options.poolSize, 10) : defaultConcurrency;
+    // A2: Concurrency from getPoolConcurrency(), must be a positive integer
+    const baseConcurrency = options.concurrency !== undefined ? Number(options.concurrency) : getPoolConcurrency();
+    if (!Number.isInteger(baseConcurrency) || baseConcurrency <= 0) {
+      throw new Error(`Pool concurrency must be a positive integer, got ${baseConcurrency}`);
+    }
+
+    // A3: DB pools size = WORKER_CONCURRENCY for each engine, overrides must be integers >= 1
+    const rawPg = options.postgresPoolSize !== undefined ? options.postgresPoolSize : process.env.POSTGRES_POOL_SIZE;
+    if (rawPg !== undefined && rawPg !== null) {
+      const parsedPg = Number(rawPg);
+      if (!Number.isInteger(parsedPg) || parsedPg < 1) {
+        throw new Error(`POSTGRES_POOL_SIZE must be an integer >= 1, got ${rawPg}`);
+      }
+      this.postgresPoolSize = parsedPg;
+    } else {
+      this.postgresPoolSize = baseConcurrency;
+    }
+
+    const rawMy = options.mysqlPoolSize !== undefined ? options.mysqlPoolSize : process.env.MYSQL_POOL_SIZE;
+    if (rawMy !== undefined && rawMy !== null) {
+      const parsedMy = Number(rawMy);
+      if (!Number.isInteger(parsedMy) || parsedMy < 1) {
+        throw new Error(`MYSQL_POOL_SIZE must be an integer >= 1, got ${rawMy}`);
+      }
+      this.mysqlPoolSize = parsedMy;
+    } else {
+      this.mysqlPoolSize = baseConcurrency;
+    }
+
+    if (options.poolSize !== undefined) {
+      const parsed = Number(options.poolSize);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`poolSize must be an integer >= 1, got ${options.poolSize}`);
+      }
+      this.targetPoolSize = parsed;
+      if (rawPg === undefined) this.postgresPoolSize = parsed;
+      if (rawMy === undefined) this.mysqlPoolSize = parsed;
+    } else {
+      this.targetPoolSize = baseConcurrency;
+    }
+
+    // A7: Global cap on concurrent boots across all pools (env WARM_POOL_MAX_CONCURRENT_BOOTS, default 3)
+    const rawMaxBoots = process.env.WARM_POOL_MAX_CONCURRENT_BOOTS || options.maxConcurrentBoots || '3';
+    const parsedMaxBoots = Number(rawMaxBoots);
+    this.maxConcurrentBoots = (Number.isInteger(parsedMaxBoots) && parsedMaxBoots > 0) ? parsedMaxBoots : 3;
+    this.currentConcurrentBoots = 0;
+    this.bootSlotWaiters = [];
 
     this.maxWaiters = parseInt(process.env.POOL_MAX_WAITERS || options.maxWaiters || '16', 10);
     this.acquireTimeoutMs = parseInt(process.env.POOL_ACQUIRE_TIMEOUT_MS || options.acquireTimeoutMs || '10000', 10);
@@ -37,7 +81,7 @@ export class WarmContainerPool {
     this.pendingRemovals = new Set();
     this.isShuttingDown = false;
 
-    // Supported warm pool languages (database engines + general CLI languages)
+    // Supported warm pool languages (database engines)
     this.pools = {
       8: {
         available: [],
@@ -73,24 +117,71 @@ export class WarmContainerPool {
       },
     };
 
-    // Pre-warm general languages (e.g. Python, Node) if language pool is enabled
-    if (config.docker?.languagePoolEnabled !== false) {
-      this.pools[5] = {
-        available: [],
-        waiters: [],
-        activeBoots: 0,
-        consecutiveFailures: 0,
-        circuitState: 'closed',
-        circuitOpenUntil: 0,
-        targetPoolSize: this.languagePoolSize,
-        image: 'coderunner/python:3.8',
-        name: 'python',
-        isDaemon: false,
-        user: null,
-        pidsLimit: 64,
-        memoryLimit: 256 * 1024 * 1024,
-      };
+    // A4: Language pools opt-in via ENABLE_LANGUAGE_POOL (default false)
+    const enableLanguagePool = options.enableLanguagePool !== undefined
+      ? Boolean(options.enableLanguagePool)
+      : (process.env.ENABLE_LANGUAGE_POOL === 'true');
+    this.enableLanguagePool = enableLanguagePool;
+
+    if (this.enableLanguagePool) {
+      const allLangs = getAllLanguages();
+      const nonDbLangs = allLangs.filter(l => l.category !== 'database' && l.id !== 7 && l.id !== 8 && l.id !== 9 && !l.is_archived);
+
+      // Group by image so languages sharing an image share one pool
+      const imageGroups = new Map();
+      for (const lang of nonDbLangs) {
+        if (!imageGroups.has(lang.image)) {
+          imageGroups.set(lang.image, []);
+        }
+        imageGroups.get(lang.image).push(lang);
+      }
+
+      for (const [image, langs] of imageGroups) {
+        const maxMinMemory = Math.max(...langs.map(l => l.min_memory || 0));
+        const effectiveMemory = Math.max(maxMinMemory, config.execution.defaultMemoryLimit || 256000);
+        const maxPidsLimit = Math.max(...langs.map(l => l.pids_limit || config.execution.maxProcesses || 64));
+        const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
+        const name = langs.map(l => (l.name || '').split(/[\s(]/)[0].toLowerCase()).join('_');
+
+        const sharedPool = {
+          available: [],
+          waiters: [],
+          activeBoots: 0,
+          consecutiveFailures: 0,
+          circuitState: 'closed',
+          circuitOpenUntil: 0,
+          targetPoolSize: baseConcurrency,
+          image,
+          name,
+          isDaemon: false,
+          user: null,
+          pidsLimit: maxPidsLimit,
+          minMemory: maxMinMemory,
+          effectiveMemory,
+          memoryLimit: effectiveMemory * 1024,
+          boxSize,
+          languages: langs.map(l => l.id),
+        };
+
+        for (const lang of langs) {
+          this.pools[lang.id] = sharedPool;
+        }
+      }
     }
+
+    // A7: Log total idle containers config will create
+    const uniquePools = new Set(Object.values(this.pools));
+    let totalTargetIdleContainers = 0;
+    for (const p of uniquePools) {
+      totalTargetIdleContainers += p.targetPoolSize;
+    }
+    this.totalTargetIdleContainers = totalTargetIdleContainers;
+    logger.info({
+      event: 'warm_pool_configured',
+      totalTargetIdleContainers,
+      maxConcurrentBoots: this.maxConcurrentBoots,
+      pools: Array.from(uniquePools).map(p => ({ name: p.name, targetPoolSize: p.targetPoolSize })),
+    });
 
     // Setup Redis heartbeat (EX 30, refreshed every 10s)
     if (this.redis) {
@@ -109,27 +200,64 @@ export class WarmContainerPool {
   }
 
   /**
+   * Acquire a slot under the global concurrent boot cap (A7)
+   */
+  async acquireBootSlot() {
+    if (this.currentConcurrentBoots < this.maxConcurrentBoots) {
+      this.currentConcurrentBoots++;
+      return;
+    }
+    return new Promise((resolve) => {
+      this.bootSlotWaiters.push(resolve);
+    });
+  }
+
+  /**
+   * Release a slot under the global concurrent boot cap (A7)
+   */
+  releaseBootSlot() {
+    if (this.bootSlotWaiters.length > 0) {
+      const next = this.bootSlotWaiters.shift();
+      next();
+    } else {
+      this.currentConcurrentBoots = Math.max(0, this.currentConcurrentBoots - 1);
+    }
+  }
+
+  /**
    * Update pool configuration dynamically
    */
   updateOptions(options = {}) {
+    if (options.concurrency !== undefined) {
+      const parsed = Number(options.concurrency);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`concurrency must be an integer >= 1, got ${options.concurrency}`);
+      }
+    }
     if (options.postgresPoolSize !== undefined) {
-      this.postgresPoolSize = parseInt(options.postgresPoolSize, 10);
+      const parsed = Number(options.postgresPoolSize);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`POSTGRES_POOL_SIZE must be an integer >= 1, got ${options.postgresPoolSize}`);
+      }
+      this.postgresPoolSize = parsed;
       if (this.pools[8]) this.pools[8].targetPoolSize = this.postgresPoolSize;
     }
     if (options.mysqlPoolSize !== undefined) {
-      this.mysqlPoolSize = parseInt(options.mysqlPoolSize, 10);
+      const parsed = Number(options.mysqlPoolSize);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`MYSQL_POOL_SIZE must be an integer >= 1, got ${options.mysqlPoolSize}`);
+      }
+      this.mysqlPoolSize = parsed;
       if (this.pools[9]) this.pools[9].targetPoolSize = this.mysqlPoolSize;
     }
-    if (options.languagePoolSize !== undefined) {
-      this.languagePoolSize = parseInt(options.languagePoolSize, 10);
-      if (this.pools[5]) this.pools[5].targetPoolSize = this.languagePoolSize;
-    }
     if (options.poolSize !== undefined) {
-      const ps = parseInt(options.poolSize, 10);
+      const ps = Number(options.poolSize);
+      if (!Number.isInteger(ps) || ps < 1) {
+        throw new Error(`poolSize must be an integer >= 1, got ${options.poolSize}`);
+      }
       this.targetPoolSize = ps;
       if (options.postgresPoolSize === undefined && this.pools[8]) this.pools[8].targetPoolSize = ps;
       if (options.mysqlPoolSize === undefined && this.pools[9]) this.pools[9].targetPoolSize = ps;
-      if (options.languagePoolSize === undefined && this.pools[5]) this.pools[5].targetPoolSize = ps;
     }
     if (options.maxWaiters !== undefined) {
       this.maxWaiters = parseInt(options.maxWaiters, 10);
@@ -139,8 +267,15 @@ export class WarmContainerPool {
     }
 
     if (!this.isShuttingDown) {
-      for (const id of Object.keys(this.pools)) {
-        this.checkReplenish(parseInt(id, 10));
+      const uniquePools = new Set(Object.values(this.pools));
+      for (const pool of uniquePools) {
+        if (pool.languages && pool.languages.length > 0) {
+          this.checkReplenish(pool.languages[0]);
+        } else if (pool.name === 'postgres') {
+          this.checkReplenish(8);
+        } else if (pool.name === 'mysql') {
+          this.checkReplenish(9);
+        }
       }
     }
   }
@@ -240,14 +375,32 @@ export class WarmContainerPool {
     }
 
     const pool = this.pools[languageId];
+    const isDb = pool ? !!pool.isDaemon : (languageId === 8 || languageId === 9);
 
-    // Non-standard submissions (networking or non-standard memory) bypass pool and run on-demand
-    const isDatabase = languageId === 7 || languageId === 8 || languageId === 9;
-    const isCustom = submission && (submission.enable_network || (!isDatabase && submission.memory_limit && submission.memory_limit > 256000));
+    if (isDb && !pool) {
+      throw new Error(`No container pool configured for language ${languageId}`);
+    }
 
-    if (!pool || isCustom) {
-      const container = await this.createOnDemandContainer(languageId, submission);
-      return container;
+    // A6: On-demand fallback (language containers only)
+    if (!isDb) {
+      if (!pool) {
+        return await this.createOnDemandContainer(languageId, submission);
+      }
+
+      const isCustom = submission && (
+        submission.enable_network ||
+        (submission.memory_limit && submission.memory_limit > (pool.effectiveMemory || 256000))
+      );
+      const poolEmpty = pool.available.length === 0;
+      const circuitOpen = pool.circuitState === 'open' && Date.now() < pool.circuitOpenUntil;
+      const queueFull = pool.waiters.length >= this.maxWaiters;
+
+      if (isCustom || poolEmpty || circuitOpen || queueFull) {
+        if (poolEmpty && !circuitOpen) {
+          this.checkReplenish(languageId);
+        }
+        return await this.createOnDemandContainer(languageId, submission);
+      }
     }
 
     const acquireStart = Date.now();
@@ -269,6 +422,12 @@ export class WarmContainerPool {
 
       this.destroy(container);
       this.checkReplenish(languageId);
+    }
+
+    // If a non-db pool became empty after dead containers, fall back to on-demand per A6
+    if (!isDb) {
+      this.checkReplenish(languageId);
+      return await this.createOnDemandContainer(languageId, submission);
     }
 
     recordPoolDepth(pool.name, 0);
@@ -496,6 +655,7 @@ export class WarmContainerPool {
       throw new Error(`Language ${languageId} is not configured in warm pool`);
     }
 
+    await this.acquireBootSlot();
     let container = null;
     const isDaemon = !!pool.isDaemon;
 
@@ -555,6 +715,8 @@ export class WarmContainerPool {
         await container.remove({ force: true, v: true }).catch(() => {});
       }
       throw err;
+    } finally {
+      this.releaseBootSlot();
     }
   }
 
@@ -658,10 +820,18 @@ export class WarmContainerPool {
   /**
    * Pre-warm pool up to target capacity
    */
-  async warmPool() {
+  async warmPool(workerType) {
+    if (workerType === 'isolate') return;
     await this.startupSweep();
-    for (const languageId of Object.keys(this.pools)) {
-      this.checkReplenish(parseInt(languageId, 10));
+    const uniquePools = new Set();
+    for (const [idStr, pool] of Object.entries(this.pools)) {
+      const languageId = parseInt(idStr, 10);
+      const isDb = pool.isDaemon || languageId === 8 || languageId === 9;
+      if (workerType === 'db' && !isDb) continue;
+      if (!uniquePools.has(pool)) {
+        uniquePools.add(pool);
+        this.checkReplenish(languageId);
+      }
     }
   }
 
@@ -671,6 +841,11 @@ export class WarmContainerPool {
   async shutdown() {
     this.isShuttingDown = true;
     logger.info({ event: 'warm_pool_shutdown_started', instanceId: this.instanceId });
+
+    while (this.bootSlotWaiters && this.bootSlotWaiters.length > 0) {
+      const next = this.bootSlotWaiters.shift();
+      next();
+    }
 
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     if (this.sweepTimer) clearInterval(this.sweepTimer);

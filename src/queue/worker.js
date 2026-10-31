@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import http from 'http';
-import config from '../utils/config.js';
+import config, { getPoolConcurrency } from '../utils/config.js';
 import logger from '../utils/logger.js';
 import { executeCode } from './jobs/executeCode.js';
 import { executeMultiCode } from './jobs/executeMultiCode.js';
@@ -127,6 +127,8 @@ async function processJob(job) {
  * Start the worker
  */
 export async function startWorker() {
+  const concurrency = getPoolConcurrency();
+
   redis = new Redis(config.redis.url, {
     maxRetriesPerRequest: null,
   });
@@ -154,7 +156,7 @@ export async function startWorker() {
   activeWorkers = queueNames.map((queueName) => {
     const w = new Worker(queueName, processJob, {
       connection: redis,
-      concurrency: config.worker.concurrency,
+      concurrency,
       removeOnComplete: { count: 100 },
       removeOnFail: { count: 1000 },
     });
@@ -189,14 +191,14 @@ export async function startWorker() {
     event: 'worker_started',
     workerType: workerType || 'all',
     queues: queueNames,
-    concurrency: config.worker.concurrency,
+    concurrency,
   });
 
-  // Pre-warm database pool for DB or standalone worker
-  if (workerType !== 'isolate' && workerType !== 'code') {
+  // A5: Never create or warm pools in WORKER_TYPE=isolate workers
+  if (workerType !== 'isolate') {
     try {
       const pool = getWarmPool();
-      pool.warmPool().catch((err) => {
+      pool.warmPool(workerType).catch((err) => {
         logger.error({ event: 'pool_warmup_error', error: err.message });
       });
     } catch (poolErr) {

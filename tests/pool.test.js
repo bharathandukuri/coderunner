@@ -96,8 +96,8 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
     const pool = new WarmContainerPool(mockDocker, {
       redis: mockRedis,
-      postgresPoolSize: 0, // don't pre-warm
-      mysqlPoolSize: 0,
+      postgresPoolSize: 1,
+      mysqlPoolSize: 1,
       acquireTimeoutMs: 1000,
     });
 
@@ -124,7 +124,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
-      postgresPoolSize: 0,
+      postgresPoolSize: 1,
       acquireTimeoutMs: 50,
       maxWaiters: 5,
     });
@@ -143,7 +143,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const mockDocker = createMockDocker({ bootDelayMs: 200 });
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
-      postgresPoolSize: 0,
+      postgresPoolSize: 1,
       maxWaiters: 2,
       acquireTimeoutMs: 500,
     });
@@ -167,7 +167,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const mockDocker = createMockDocker({ failBootTimes: 1, bootDelayMs: 5 });
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
-      postgresPoolSize: 0,
+      postgresPoolSize: 1,
       acquireTimeoutMs: 1500,
     });
 
@@ -183,7 +183,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const mockDocker = createMockDocker({ failBootTimes: 10 });
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
-      postgresPoolSize: 0,
+      postgresPoolSize: 1,
       acquireTimeoutMs: 500,
     });
 
@@ -260,7 +260,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const mockDocker = createMockDocker({ bootDelayMs: 50 });
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
-      postgresPoolSize: 0,
+      postgresPoolSize: 1,
       acquireTimeoutMs: 1000,
     });
 
@@ -305,9 +305,9 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const mockDocker = createMockDocker();
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
-      languagePoolSize: 1,
-      postgresPoolSize: 0,
-      mysqlPoolSize: 0,
+      enableLanguagePool: true,
+      postgresPoolSize: 1,
+      mysqlPoolSize: 1,
     });
 
     // Language 5 (Python) should be pre-configured as non-daemon
@@ -343,6 +343,146 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
     assert(acquired);
     assert.strictEqual(acquired.opts.NetworkDisabled, false);
+
+    await pool.shutdown();
+  });
+
+  it('11. Invalid WORKER_CONCURRENCY throws at initialization', () => {
+    const mockDocker = createMockDocker();
+    for (const invalid of [0, -1, 'abc']) {
+      assert.throws(() => {
+        new WarmContainerPool(mockDocker, {
+          redis: createMockRedis(),
+          concurrency: invalid,
+        });
+      }, /positive integer/);
+    }
+  });
+
+  it('12. DB pool sizes equal WORKER_CONCURRENCY by default, invalid overrides throw', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 3,
+    });
+    assert.strictEqual(pool.pools[8].targetPoolSize, 3);
+    assert.strictEqual(pool.pools[9].targetPoolSize, 3);
+    await pool.shutdown();
+
+    // Invalid POSTGRES_POOL_SIZE (< 1) must throw
+    assert.throws(() => {
+      new WarmContainerPool(mockDocker, {
+        redis: createMockRedis(),
+        concurrency: 3,
+        postgresPoolSize: 0,
+      });
+    }, /POSTGRES_POOL_SIZE must be an integer >= 1/);
+
+    // Invalid MYSQL_POOL_SIZE (< 1) must throw
+    assert.throws(() => {
+      new WarmContainerPool(mockDocker, {
+        redis: createMockRedis(),
+        concurrency: 3,
+        mysqlPoolSize: -2,
+      });
+    }, /MYSQL_POOL_SIZE must be an integer >= 1/);
+  });
+
+  it('13. ENABLE_LANGUAGE_POOL=false creates no language pools', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 2,
+      enableLanguagePool: false,
+    });
+
+    assert.strictEqual(pool.pools[5], undefined, 'Language 5 pool must not exist');
+    assert.strictEqual(pool.pools[1], undefined, 'Language 1 pool must not exist');
+    assert(pool.pools[8], 'PostgreSQL pool must exist');
+    assert(pool.pools[9], 'MySQL pool must exist');
+
+    await pool.shutdown();
+  });
+
+  it('14. Language pool fallbacks: on-demand when empty, circuit open, or queue full', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 2,
+      enableLanguagePool: true,
+    });
+
+    // Language 5 pool starts empty -> acquire falls back to on-demand
+    const c1 = await pool.acquire({ language: { id: 5, image: 'coderunner/python:3.8' } });
+    assert(c1);
+    assert.strictEqual(c1.opts.Labels['com.coderunner.pool'], 'false');
+
+    // Simulate circuit open
+    pool.pools[5].circuitState = 'open';
+    pool.pools[5].circuitOpenUntil = Date.now() + 60000;
+    const c2 = await pool.acquire({ language: { id: 5, image: 'coderunner/python:3.8' } });
+    assert(c2);
+    assert.strictEqual(c2.opts.Labels['com.coderunner.pool'], 'false');
+
+    await pool.shutdown();
+  });
+
+  it('15. DB languages NEVER use on-demand fallback path', async () => {
+    const mockDocker = createMockDocker();
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 1,
+      acquireTimeoutMs: 50,
+      maxWaiters: 1,
+    });
+
+    // Make DB container creation hang to trigger timeout
+    mockDocker.createContainer = async () => {
+      await new Promise(r => setTimeout(r, 200));
+      throw new Error('Slow DB boot');
+    };
+
+    // DB acquire must fail with timeout or queue-full, NEVER return an unready on-demand container
+    await assert.rejects(async () => {
+      await pool.acquire(8);
+    }, /Timed out waiting for database container/);
+
+    await pool.shutdown();
+  });
+
+  it('16. Global concurrent boot cap (WARM_POOL_MAX_CONCURRENT_BOOTS) is respected', async () => {
+    let activeBootsCount = 0;
+    let maxActiveObserved = 0;
+
+    const mockDocker = createMockDocker({ bootDelayMs: 20 });
+    const originalCreate = mockDocker.createContainer;
+    mockDocker.createContainer = async (opts) => {
+      activeBootsCount++;
+      if (activeBootsCount > maxActiveObserved) {
+        maxActiveObserved = activeBootsCount;
+      }
+      await new Promise(r => setTimeout(r, 25));
+      activeBootsCount--;
+      return originalCreate(opts);
+    };
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      concurrency: 2,
+      maxConcurrentBoots: 2,
+      postgresPoolSize: 2,
+      mysqlPoolSize: 2,
+    });
+
+    // Trigger 4 concurrent boots (2 postgres, 2 mysql)
+    const p1 = pool.replenish(8);
+    const p2 = pool.replenish(8);
+    const p3 = pool.replenish(9);
+    const p4 = pool.replenish(9);
+
+    await Promise.all([p1, p2, p3, p4]);
+
+    assert(maxActiveObserved <= 2, `Max active boots observed (${maxActiveObserved}) exceeded cap of 2`);
 
     await pool.shutdown();
   });

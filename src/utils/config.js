@@ -31,7 +31,7 @@ const config = {
   },
 
   worker: {
-    concurrency: parseInt(process.env.WORKER_CONCURRENCY) || 4,
+    concurrency: process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4,
   },
 
   cache: {
@@ -48,9 +48,21 @@ const config = {
     host: process.env.DOCKER_HOST,
     runtime: process.env.DOCKER_RUNTIME,
     containerTimeout: parseInt(process.env.CONTAINER_TIMEOUT) || 30000,
-    languagePoolEnabled: process.env.ENABLE_LANGUAGE_POOL !== 'false',
-    languagePoolSize: parseInt(process.env.LANGUAGE_POOL_SIZE || '1', 10),
+    languagePoolEnabled: process.env.ENABLE_LANGUAGE_POOL === 'true',
+    maxConcurrentBoots: parseInt(process.env.WARM_POOL_MAX_CONCURRENT_BOOTS) || 3,
   },
 };
+
+/**
+ * Get pool concurrency from config.
+ * Throws a clear Error if it is not a positive integer.
+ */
+export function getPoolConcurrency() {
+  const c = config.worker?.concurrency;
+  if (typeof c !== 'number' || !Number.isInteger(c) || c <= 0) {
+    throw new Error(`WORKER_CONCURRENCY must be a positive integer, got ${process.env.WORKER_CONCURRENCY ?? c}`);
+  }
+  return c;
+}
 
 export default config;

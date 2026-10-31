@@ -66,7 +66,8 @@ export function getRedis() {
  * Get submission queue
  */
 export function getQueue(languageId) {
-  if (languageId === 8 || languageId === 9) {
+  const id = Number(languageId);
+  if (id === 8 || id === 9) {
     return dbSubmissionQueue || submissionQueue;
   }
   return submissionQueue;
@@ -87,7 +88,8 @@ export async function addSubmission(submission) {
     JSON.stringify(submission)
   );
 
-  const isDb = submission.language_id === 8 || submission.language_id === 9;
+  const langId = Number(submission.language_id);
+  const isDb = langId === 8 || langId === 9;
   const targetQueue = (isDb && dbSubmissionQueue) ? dbSubmissionQueue : submissionQueue;
 
   // Add job to target queue

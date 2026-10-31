@@ -34,7 +34,8 @@ function isIsolateAvailable() {
  * Other languages auto-select: Isolate if available, otherwise Docker.
  */
 export function getExecutor(languageId) {
-  if (languageId === 8 || languageId === 9) {
+  const id = Number(languageId);
+  if (id === 8 || id === 9) {
     return getDockerExecutor();
   }
 
@@ -61,7 +62,8 @@ export function getExecutor(languageId) {
  * Get the current executor type
  */
 export function getExecutorType(languageId) {
-  if (languageId === 8 || languageId === 9) {
+  const id = Number(languageId);
+  if (id === 8 || id === 9) {
     return 'docker';
   }
 
