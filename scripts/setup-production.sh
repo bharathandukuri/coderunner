@@ -91,6 +91,55 @@ fi
 sudo systemctl enable docker
 sudo systemctl start docker
 
+# ── cgroups v2 check ─────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}  Checking cgroups v2 (required for isolate worker)...${NC}"
+if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
+    echo -e "${GREEN}  ✓ cgroups v2 detected${NC}"
+    CGROUP_V2=true
+else
+    echo -e "${YELLOW}  ⚠ cgroups v2 not found. The isolate worker needs it.${NC}"
+    echo "    Add 'systemd.unified_cgroup_hierarchy=1' to the kernel cmdline and reboot."
+    CGROUP_V2=false
+fi
+
+# ── isolate check ─────────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}  Checking isolate binary...${NC}"
+ISOLATE_OK=false
+if command -v isolate &> /dev/null; then
+    ISOLATE_VER=$(isolate --version 2>&1 | head -1 || echo "unknown version")
+    echo -e "${GREEN}  ✓ isolate found ($ISOLATE_VER)${NC}"
+    ISOLATE_OK=true
+else
+    echo -e "${YELLOW}  ⚠ isolate not found — isolate worker will not be usable.${NC}"
+    echo "    Install guide: https://github.com/ioi/isolate"
+    echo "    The db worker and Docker fallback are unaffected."
+fi
+
+# ── gVisor check ──────────────────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}  Checking gVisor (runsc) for extra container hardening...${NC}"
+GVISOR_OK=false
+if command -v runsc &> /dev/null; then
+    RUNSC_VER=$(runsc --version 2>&1 | head -1 || echo "unknown version")
+    echo -e "${GREEN}  ✓ runsc found ($RUNSC_VER)${NC}"
+    if docker info 2>/dev/null | grep -q "runsc"; then
+        echo -e "${GREEN}  ✓ Docker runtime 'runsc' is registered${NC}"
+        GVISOR_OK=true
+    else
+        echo -e "${YELLOW}  ⚠ runsc binary found but Docker does not list it as a runtime.${NC}"
+        echo "    Add to /etc/docker/daemon.json:"
+        echo '      { "runtimes": { "runsc": { "path": "/usr/local/bin/runsc" } } }'
+        echo "    Then: sudo systemctl restart docker"
+    fi
+else
+    echo -e "${YELLOW}  ⚠ gVisor (runsc) not installed — containers will use default runc.${NC}"
+    echo "    Install guide: https://gvisor.dev/docs/user_guide/install/"
+    echo "    After installing, set DOCKER_RUNTIME=runsc in .env to activate it."
+fi
+echo ""
+
 # Step 3: Install Docker Compose
 echo -e "${GREEN}[3/7] Installing Docker Compose...${NC}"
 if ! command -v docker-compose &> /dev/null && ! docker compose version &> /dev/null; then
@@ -151,6 +200,12 @@ METRICS_TOKEN=${METRICS_TOKEN}
 REDIS_URL=redis://redis:6379
 EOF
 
+# Patch DOCKER_RUNTIME if gVisor is fully available
+if [ "${GVISOR_OK:-false}" = "true" ]; then
+    echo "DOCKER_RUNTIME=runsc" >> .env
+    echo -e "${GREEN}✓ Set DOCKER_RUNTIME=runsc in .env${NC}"
+fi
+
 echo -e "${GREEN}✓ Configuration created${NC}"
 
 # Caddyfile reads SITE_ADDRESS, which docker-compose derives from DOMAIN:
@@ -169,10 +224,53 @@ echo "Starting services..."
 docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 
+# ── Docker proxy verification ─────────────────────────────────────────────────
+echo ""
+echo -e "${GREEN}  Verifying docker-socket-proxy...${NC}"
+# Wait up to 15s for the proxy to be ready
+PROXY_URL="http://127.0.0.1:2375"
+for i in $(seq 1 15); do
+    if curl -sf --max-time 1 "${PROXY_URL}/_ping" > /dev/null 2>&1; then
+        break
+    fi
+    sleep 1
+done
+
+if curl -sf --max-time 2 "${PROXY_URL}/_ping" > /dev/null 2>&1; then
+    if PROXY_URL="${PROXY_URL}" bash ./scripts/verify-docker-proxy.sh; then
+        echo -e "${GREEN}  ✓ Docker proxy verification passed${NC}"
+    else
+        echo -e "${RED}  ✗ Docker proxy verification FAILED — check proxy flags in docker-compose.prod.yml${NC}"
+    fi
+else
+    echo -e "${YELLOW}  ⚠ docker-proxy not reachable at ${PROXY_URL} — skipping verification.${NC}"
+    echo "    Run manually later: PROXY_URL=${PROXY_URL} bash scripts/verify-docker-proxy.sh"
+fi
+
 echo ""
 echo "========================================"
 echo -e "  ${GREEN}Setup Complete!${NC}"
 echo "========================================"
+echo ""
+
+# ── Capability matrix ─────────────────────────────────────────────────────────
+echo "  Capability matrix:"
+printf "  ${GREEN}%-30s %s${NC}\n" "Docker daemon:" "$(docker --version | cut -d' ' -f3 | tr -d ',')"
+if [ "${ISOLATE_OK:-false}" = "true" ] && [ "${CGROUP_V2:-false}" = "true" ]; then
+    printf "  ${GREEN}%-30s %s${NC}\n" "Isolate worker:" "✓  (set WORKER_TYPE=isolate)"
+else
+    printf "  ${YELLOW}%-30s %s${NC}\n" "Isolate worker:" "✗  not available"
+fi
+if [ "${GVISOR_OK:-false}" = "true" ]; then
+    printf "  ${GREEN}%-30s %s${NC}\n" "gVisor (runsc):" "✓  DOCKER_RUNTIME=runsc set"
+else
+    printf "  ${YELLOW}%-30s %s${NC}\n" "gVisor (runsc):" "✗  using default runc"
+fi
+if [ "${CGROUP_V2:-false}" = "true" ]; then
+    printf "  ${GREEN}%-30s %s${NC}\n" "cgroups v2:" "✓"
+else
+    printf "  ${YELLOW}%-30s %s${NC}\n" "cgroups v2:" "✗  needed for isolate"
+fi
 echo ""
 if [ "$MODE" = "domain" ]; then
     echo -e "URL:           ${GREEN}${BASE_URL}${NC}"
