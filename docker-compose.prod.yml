@@ -5,18 +5,21 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      # Blank/unset DOMAIN => ":80" => plain HTTP on the server's IP, no SSL.
       - SITE_ADDRESS=${DOMAIN:-:80}
-      # Must be non-empty: Caddy's header matcher fails to parse on a blank
-      # value and the container crashloops with "malformed header matcher".
-      - "METRICS_TOKEN=${METRICS_TOKEN:?METRICS_TOKEN must be set (generate one with openssl rand -hex 16)}"
+      - GRAFANA_SITE_ADDRESS=${GRAFANA_SITE_ADDRESS:-:8081}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+      - caddy_logs:/var/log/caddy
     depends_on:
       - api
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -34,14 +37,21 @@ services:
       - PORT=3000
       - BODY_LIMIT=50mb
       - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-200}
+      - RATE_LIMIT_SUBMISSIONS_MAX=${RATE_LIMIT_SUBMISSIONS_MAX:-120}
+      - RATE_LIMIT_SUBMISSIONS_WINDOW_MS=${RATE_LIMIT_SUBMISSIONS_WINDOW_MS:-60000}
     depends_on:
       - redis
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
-          cpus: '${API_CPUS:-0.25}'
-          memory: ${API_MEMORY:-256M}
+          cpus: '${API_CPUS:-0.5}'
+          memory: ${API_MEMORY:-512M}
 
   worker:
     build:
@@ -49,8 +59,6 @@ services:
       dockerfile: docker/worker/Dockerfile
     command: node src/queue/worker.js
     privileged: true
-    # isolate writes to /sys/fs/cgroup/cgroup.subtree_control; the host cgroup
-    # namespace is required for that to take effect (see docker/worker/entrypoint.sh).
     cgroup: host
     environment:
       - NODE_ENV=production
@@ -60,13 +68,18 @@ services:
       - DEFAULT_MEMORY_LIMIT=${DEFAULT_MEMORY_LIMIT:-256000}
       - MAX_MEMORY_LIMIT=${MAX_MEMORY_LIMIT:-512000}
       - RESULT_CACHE_TTL=${RESULT_CACHE_TTL:-1800}
+      - PORT=3000
     depends_on:
       - redis
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
-          # Must not exceed the host's vCPU count or Docker refuses to start it.
           cpus: '${WORKER_CPUS:-1.5}'
           memory: ${WORKER_MEMORY:-4G}
 
@@ -81,14 +94,19 @@ services:
       - EXEC=1
       - INFO=1
       - NETWORKS=0
-      - VOLUMES=0
+      - VOLUMES=1
       - SWARM=0
       - NODES=0
       - SERVICES=0
       - SECRETS=0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -110,10 +128,16 @@ services:
       - WORKER_TYPE=db
       - WORKER_CONCURRENCY=${WORKER_DB_CONCURRENCY:-2}
       - RESULT_CACHE_TTL=${RESULT_CACHE_TTL:-1800}
+      - PORT=3000
     depends_on:
       - redis
       - docker-proxy
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -125,23 +149,124 @@ services:
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-256mb} --maxmemory-policy noeviction
-    restart: always
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
           cpus: '${REDIS_CPUS:-0.25}'
           memory: ${REDIS_MEMORY:-384M}
 
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.3'
+          memory: 256M
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.66.0
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 128M
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - '--config.file=/tmp/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        sed "s|ALERT_WEBHOOK_URL_PLACEHOLDER|$${ALERT_WEBHOOK_URL:-http://localhost:9099/webhook}|g" /etc/alertmanager/alertmanager.template.yml > /tmp/alertmanager.yml
+        exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
+    volumes:
+      - ./alertmanager.template.yml:/etc/alertmanager/alertmanager.template.yml:ro
+      - alertmanager_data:/alertmanager
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.54.1
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./alertrules.yml:/etc/prometheus/alertrules.yml:ro
       - prometheus_data:/prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}'
-    restart: always
+    depends_on:
+      - alertmanager
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -149,13 +274,24 @@ services:
           memory: ${PROMETHEUS_MEMORY:-512M}
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.4.0
+    ports:
+      - "127.0.0.1:3001:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - "GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set and not equal to admin}"
       - GF_USERS_ALLOW_SIGN_UP=false
-    restart: always
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-%(protocol)s://%(domain)s:%(http_port)s/}
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     deploy:
       resources:
         limits:
@@ -165,12 +301,13 @@ services:
 volumes:
   redis_data:
   prometheus_data:
+  alertmanager_data:
   grafana_data:
   caddy_data:
   caddy_config:
+  caddy_logs:
 
 networks:
   default:
   docker-socket-net:
     internal: true
-

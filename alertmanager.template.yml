@@ -1,0 +1,15 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'engine', 'instance', 'job']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  receiver: 'default-webhook'
+
+receivers:
+  - name: 'default-webhook'
+    webhook_configs:
+      - url: 'ALERT_WEBHOOK_URL_PLACEHOLDER'
+        send_resolved: true

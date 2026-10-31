@@ -1,0 +1,94 @@
+{
+  "annotations": { "list": [] },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Submissions by Status & Language",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(coderunner_submissions_total[5m])) by (status, language)",
+          "legendFormat": "{{language}} status={{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Execution Duration (p50 & p95)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(coderunner_submission_duration_seconds_bucket[5m])) by (le, language))",
+          "legendFormat": "{{language}} p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(coderunner_submission_duration_seconds_bucket[5m])) by (le, language))",
+          "legendFormat": "{{language}} p95",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Queue Size (Waiting)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "coderunner_queue_size",
+          "legendFormat": "Waiting in queue",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Queue Processing vs Failed",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "targets": [
+        {
+          "expr": "coderunner_queue_processing",
+          "legendFormat": "Processing",
+          "refId": "A"
+        },
+        {
+          "expr": "coderunner_queue_failed",
+          "legendFormat": "Failed",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Active Worker Count",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "targets": [
+        {
+          "expr": "coderunner_workers_active",
+          "legendFormat": "Active workers",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["coderunner", "api", "queue"],
+  "time": { "from": "now-30m", "to": "now" },
+  "title": "CodeRunner - API & Queue Metrics",
+  "uid": "coderunner-api-queue",
+  "version": 1
+}

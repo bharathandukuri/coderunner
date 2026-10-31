@@ -1,24 +1,26 @@
-# Site address. Set by docker-compose from DOMAIN in .env:
+# Site address set by docker-compose:
 #   DOMAIN unset/blank -> ":80"  -> plain HTTP on every IP, no certificate
-#   DOMAIN=example.com -> the domain -> automatic HTTPS via Let's Encrypt
-# Caddy only attempts a certificate when the address carries a hostname, so
-# the IP-only mode needs no DNS record and never touches port 443.
+#   DOMAIN=example.com -> {$DOMAIN} -> automatic HTTPS via Let's Encrypt
 {$SITE_ADDRESS::80} {
-    # Prometheus metrics - token protected
-    @metrics {
-        path /metrics/*
-        header X-Metrics-Token {$METRICS_TOKEN:}
-    }
-    handle @metrics {
-        uri strip_prefix /metrics
-        reverse_proxy prometheus:9090
-    }
-    handle /metrics/* {
-        respond "Unauthorized" 401
+    # Request body size limit
+    request_body {
+        max_size 50MB
     }
 
-    # Reverse proxy to API
-    reverse_proxy api:3000
+    # Block public access to /metrics completely (Prometheus scrapes via internal network)
+    @blocked_metrics {
+        path /metrics*
+    }
+    handle @blocked_metrics {
+        respond "Forbidden" 403
+    }
+
+    # Reverse proxy to API with 30s response header timeout (supports wait=true 15s budget + margin)
+    reverse_proxy api:3000 {
+        transport http {
+            response_header_timeout 30s
+        }
+    }
 
     # Compression
     encode gzip
@@ -28,12 +30,39 @@
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         -Server
     }
 
-    # Logging
+    # JSON access logging with log rotation
     log {
-        output stdout
+        output file /var/log/caddy/access.log {
+            roll_size 10mb
+            roll_keep 5
+            roll_keep_for 720h
+        }
+        format json
+    }
+}
+
+# Subdomain for Grafana when DOMAIN is configured (defaults to unexposed :8081 if unset)
+{$GRAFANA_SITE_ADDRESS::8081} {
+    reverse_proxy grafana:3000
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options SAMEORIGIN
+        Referrer-Policy strict-origin-when-cross-origin
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/grafana.log {
+            roll_size 10mb
+            roll_keep 5
+            roll_keep_for 720h
+        }
         format json
     }
 }

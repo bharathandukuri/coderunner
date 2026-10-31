@@ -5,7 +5,7 @@ global:
 alerting:
   alertmanagers:
     - static_configs:
-        - targets: []
+        - targets: ['alertmanager:9093']
 
 rule_files:
   - 'alertrules.yml'
@@ -22,18 +22,29 @@ scrape_configs:
       - targets: ['api:3000']
     metrics_path: '/metrics'
 
-  # CodeRunner Worker metrics (if exposed)
+  # CodeRunner Worker (isolate) metrics
   - job_name: 'coderunner-worker'
     static_configs:
       - targets: ['worker:3000']
     metrics_path: '/metrics'
 
-  # Redis metrics (requires redis_exporter)
-  # - job_name: 'redis'
-  #   static_configs:
-  #     - targets: ['redis-exporter:9121']
+  # CodeRunner Worker DB (warm pools) metrics
+  - job_name: 'coderunner-worker-db'
+    static_configs:
+      - targets: ['worker-db:3000']
+    metrics_path: '/metrics'
 
-  # Docker metrics (requires cadvisor)
-  # - job_name: 'cadvisor'
-  #   static_configs:
-  #     - targets: ['cadvisor:8080']
+  # Host system metrics (CPU, RAM, Disk, Load)
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # Container metrics (CPU, RAM, cgroups, tmpfs)
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+
+  # Redis metrics
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']

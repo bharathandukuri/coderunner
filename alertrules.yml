@@ -55,3 +55,76 @@ groups:
           summary: "Circuit breaker tripped for {{ $labels.engine }}"
           description: "Circuit breaker for {{ $labels.engine }} has tripped into half-open or open state due to consecutive boot failures."
 
+      - alert: LeakedPoolContainers
+        expr: (coderunner_pool_leaked_containers > 0) or (count(container_last_seen{name=~".*coderunner.*"}) > 25)
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Leaked or untracked pool containers detected"
+          description: "Container count or pool orphan tracker indicates unmanaged containers running."
+
+  - name: coderunner_infrastructure_alerts
+    rules:
+      - alert: TargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Scrape target {{ $labels.job }} is down"
+          description: "Target {{ $labels.instance }} has been unreachable for more than 2 minutes."
+
+      - alert: QueueBacklogGrowing
+        expr: coderunner_queue_size > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Queue backlog growing"
+          description: "More than 10 submissions are waiting in the queue for > 2 minutes."
+
+      - alert: InternalErrorRateHigh
+        expr: (sum(rate(coderunner_submissions_total{status="13"}[5m])) / (sum(rate(coderunner_submissions_total[5m])) + 0.0001)) > 0.05
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Internal error rate (status 13) exceeds 5%"
+          description: "Submissions failing with internal error rate > 5% over 5 minutes."
+
+      - alert: HighTLERatio
+        expr: (sum(rate(coderunner_submissions_total{status="5"}[5m])) / (sum(rate(coderunner_submissions_total[5m])) + 0.0001)) > 0.2
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High Time Limit Exceeded (TLE) ratio"
+          description: "More than 20% of submissions are resulting in TLE (status 5)."
+
+      - alert: HostMemoryHigh
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory usage exceeds 85%"
+          description: "Host available memory is below 15% for more than 2 minutes."
+
+      - alert: RootDiskHigh
+        expr: (1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"})) * 100 > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root filesystem usage exceeds 80%"
+          description: "Root disk usage is above 80% for more than 2 minutes."
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis server is down"
+          description: "Redis instance cannot be reached by redis_exporter for 1 minute."
