@@ -126,10 +126,10 @@ async function processJob(job) {
 /**
  * Start the worker
  */
-export async function startWorker() {
+export async function startWorker(options = {}) {
   const concurrency = getPoolConcurrency();
 
-  redis = new Redis(config.redis.url, {
+  redis = options.redis || new Redis(config.redis.url, {
     maxRetriesPerRequest: null,
   });
 
@@ -153,8 +153,9 @@ export async function startWorker() {
     queueNames.push('submissions', 'submissions-db');
   }
 
+  const WorkerClass = options.Worker || Worker;
   activeWorkers = queueNames.map((queueName) => {
-    const w = new Worker(queueName, processJob, {
+    const w = new WorkerClass(queueName, processJob, {
       connection: redis,
       concurrency,
       removeOnComplete: { count: 100 },
@@ -206,7 +207,9 @@ export async function startWorker() {
     }
   }
 
-  startMetricsServer();
+  if (!options.skipMetricsServer) {
+    startMetricsServer();
+  }
   return activeWorkers[0];
 }
 

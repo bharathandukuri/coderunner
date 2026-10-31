@@ -997,31 +997,71 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     _resetWarmPool();
     assert.strictEqual(peekWarmPool(), null, 'Pool should be null before isolate worker run');
 
+    const hadWorkerType = 'WORKER_TYPE' in process.env;
     const origWorkerType = process.env.WORKER_TYPE;
-    const origPort = process.env.WORKER_METRICS_PORT;
+    const hadMetricsPort = 'WORKER_METRICS_PORT' in process.env;
+    const origMetricsPort = process.env.WORKER_METRICS_PORT;
+    const hadPort = 'PORT' in process.env;
+    const origPort = process.env.PORT;
+
     process.env.WORKER_TYPE = 'isolate';
-    // Use unused high port or skip server port
-    process.env.WORKER_METRICS_PORT = '39123';
 
     try {
-      // Dynamic import to avoid side effects
       const workerMod = await import('../src/queue/worker.js');
-      const mockBullWorker = {
-        close: async () => {},
+
+      let redisQuitCalled = false;
+      const mockRedis = new EventEmitter();
+      mockRedis.setex = async () => 'OK';
+      mockRedis.quit = async () => {
+        redisQuitCalled = true;
+        return 'OK';
       };
 
-      // Call startWorker in isolate mode
-      // Notice: In unit tests without running Redis, we mock Redis connections
-      // Here we verify peekWarmPool() remains null through lifecycle
-      assert.strictEqual(peekWarmPool(), null, 'peekWarmPool() must be null before stopWorker');
+      let workerClosed = false;
+      class MockWorker extends EventEmitter {
+        constructor(queueName, processor, opts) {
+          super();
+          this.queueName = queueName;
+          this.opts = opts;
+        }
+        async close() {
+          workerClosed = true;
+        }
+      }
+
+      // Actually call startWorker with WORKER_TYPE=isolate and injected mocks
+      await workerMod.startWorker({
+        redis: mockRedis,
+        Worker: MockWorker,
+        skipMetricsServer: true,
+      });
+
+      // Assert peekWarmPool() is null (no WarmContainerPool was constructed)
+      assert.strictEqual(peekWarmPool(), null, 'peekWarmPool() must be null while isolate worker is active');
 
       // Call stopWorker
       await workerMod.stopWorker();
 
-      assert.strictEqual(peekWarmPool(), null, 'peekWarmPool() must remain null after stopWorker in isolate worker');
+      // Assert peekWarmPool() remains null and worker/redis were properly closed
+      assert.strictEqual(peekWarmPool(), null, 'peekWarmPool() must remain null after stopWorker() in isolate worker');
+      assert.strictEqual(workerClosed, true, 'BullMQ worker must be closed on stopWorker()');
+      assert.strictEqual(redisQuitCalled, true, 'Worker Redis client should have quit on stopWorker()');
     } finally {
-      process.env.WORKER_TYPE = origWorkerType;
-      process.env.WORKER_METRICS_PORT = origPort;
+      if (hadWorkerType) {
+        process.env.WORKER_TYPE = origWorkerType;
+      } else {
+        delete process.env.WORKER_TYPE;
+      }
+      if (hadMetricsPort) {
+        process.env.WORKER_METRICS_PORT = origMetricsPort;
+      } else {
+        delete process.env.WORKER_METRICS_PORT;
+      }
+      if (hadPort) {
+        process.env.PORT = origPort;
+      } else {
+        delete process.env.PORT;
+      }
     }
   });
 
