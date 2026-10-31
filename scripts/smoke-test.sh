@@ -208,7 +208,7 @@ test_postgres() {
 
 # 7. MySQL 8.4
 test_mysql() {
-  submit_and_verify 9 "SELECT 'SMOKE_MYSQL_OK' AS status;" "SMOKE_MYSQL_OK"
+  submit_and_verify 9 "SELECT 'SMOKE_MYSQL_OK' AS status;" "SMOKE_MYSQL_OK" 3 15
 }
 
 # 8. Time Limit Exceeded (TLE)

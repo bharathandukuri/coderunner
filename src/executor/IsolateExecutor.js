@@ -523,7 +523,7 @@ class IsolateExecutor {
           stdinFile,
           timeLimit: cpu_time_limit,
           wallTimeLimit: wall_time_limit,
-          memoryLimit,
+          memoryLimit: memory_limit,
           processes: max_processes_and_or_threads,
         });
 
