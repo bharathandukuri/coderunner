@@ -835,12 +835,24 @@ export class WarmContainerPool {
       isPool: false,
     });
 
-    const container = await this.docker.createContainer(containerConfig);
-    await container.start();
-    if (container && container.id) {
-      this.trackedOnDemandIds.add(container.id);
+    let container = null;
+    try {
+      container = await this.docker.createContainer(containerConfig);
+      await container.start();
+      if (container && container.id) {
+        this.trackedOnDemandIds.add(container.id);
+      }
+      return container;
+    } catch (err) {
+      if (container && typeof container.remove === 'function') {
+        try {
+          await container.remove({ force: true, v: true });
+        } catch {
+          // Ignore remove failure during cleanup
+        }
+      }
+      throw err;
     }
-    return container;
   }
 
   /**

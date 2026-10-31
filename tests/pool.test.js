@@ -950,5 +950,46 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     await pool.release(container2);
     await pool.shutdown();
   });
+
+  it('26. createOnDemandContainer cleanup on start() failure (Issue 3)', async () => {
+    let removeCalledWith = null;
+
+    const mockDocker = createMockDocker();
+    mockDocker.createContainer = async (config) => {
+      const id = 'ondemand-fail-start';
+      return {
+        id,
+        Id: id,
+        opts: config,
+        running: false,
+        start: async () => {
+          throw new Error('Docker daemon failed to start on-demand container');
+        },
+        remove: async (opts) => {
+          removeCalledWith = opts;
+          return { id };
+        },
+        inspect: async () => ({ State: { Running: false } }),
+        exec: async () => ({}),
+      };
+    };
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: createMockRedis(),
+      enableLanguagePool: false,
+    });
+
+    await assert.rejects(
+      pool.createOnDemandContainer(5, { memory_limit: 128000 }),
+      { message: 'Docker daemon failed to start on-demand container' }
+    );
+
+    assert.ok(removeCalledWith, 'remove should be called when start fails');
+    assert.strictEqual(removeCalledWith.force, true);
+    assert.strictEqual(removeCalledWith.v, true);
+    assert.strictEqual(pool.trackedOnDemandIds.size, 0, 'No failed container should remain in trackedOnDemandIds');
+
+    await pool.shutdown();
+  });
 });
 
