@@ -43,7 +43,7 @@ function percentile(arr, p) {
 }
 
 function statsSummary(arr) {
-  if (!arr || arr.length === 0) return { p50: 0, p95: 0, p99: 0, min: 0, max: 0, avg: 0 };
+  if (!arr || arr.length === 0) return { p50: 'N/A', p95: 'N/A', p99: 'N/A', min: 'N/A', max: 'N/A', avg: 'N/A' };
   const sum = arr.reduce((a, b) => a + b, 0);
   return {
     p50: percentile(arr, 50),
@@ -228,8 +228,26 @@ async function main() {
     }
   }
 
-  // Python warm hit
-  report.boots['Python (3.8) Warm'] = { p50: 1, p95: 2, p99: 3, avg: 1, min: 0, max: 4 };
+  // Python warm acquire measurement
+  process.stdout.write('Measuring Python (3.8) Warm acquire... ');
+  const warmAcquireTimes = [];
+  try {
+    for (let i = 0; i < ITERATIONS; i++) {
+      if (!benchPool.pools[5] || benchPool.pools[5].available.length === 0) {
+        await benchPool.replenish(5);
+      }
+      const t0 = performance.now();
+      const container = await benchPool.acquire(5);
+      const duration = performance.now() - t0;
+      warmAcquireTimes.push(Math.round(duration));
+      await benchPool.destroy(container);
+    }
+    report.boots['Python (3.8) Warm'] = statsSummary(warmAcquireTimes);
+    console.log(`p50: ${report.boots['Python (3.8) Warm'].p50}ms | p95: ${report.boots['Python (3.8) Warm'].p95}ms | p99: ${report.boots['Python (3.8) Warm'].p99}ms`);
+  } catch (err) {
+    console.log(`Failed (${err.message}), setting N/A`);
+    report.boots['Python (3.8) Warm'] = { p50: 'N/A', p95: 'N/A', p99: 'N/A', min: 'N/A', max: 'N/A', avg: 'N/A' };
+  }
 
   // 2. Heavy Load: Peak RAM and tmpfs usage
   console.log('\n--- 2. Measuring Heavy Load & Peak Resource Usage ---');

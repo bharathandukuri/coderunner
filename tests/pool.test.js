@@ -1024,5 +1024,34 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       process.env.WORKER_METRICS_PORT = origPort;
     }
   });
+
+  it('28. scripts/bench-pool.mjs contains no hard-coded numeric literals assigned to report fields', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { fileURLToPath } = await import('url');
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const benchScriptPath = path.join(__dirname, '../scripts/bench-pool.mjs');
+    const content = fs.readFileSync(benchScriptPath, 'utf8');
+
+    const lines = content.split('\n');
+    const violations = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('//') || line.startsWith('*')) continue;
+      if (line.includes('const report =') || line.includes('let report =')) continue;
+      if (line.startsWith('report.')) {
+        const rightSide = line.split('=')[1]?.trim() || '';
+        if (/^\{.*:\s*\d+/.test(rightSide) || /^\d+;?$/.test(rightSide)) {
+          violations.push(`Line ${i + 1}: ${line}`);
+        }
+      }
+    }
+    assert.strictEqual(
+      violations.length,
+      0,
+      `Found hardcoded numeric literals assigned to report in bench-pool.mjs:\n${violations.join('\n')}`
+    );
+  });
 });
 
