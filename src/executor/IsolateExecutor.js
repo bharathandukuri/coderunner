@@ -516,7 +516,7 @@ class IsolateExecutor {
           const jsFile = entryPoint.replace(/\.ts$/, '.js');
           runCmd = `node '${jsFile}' ${argsStr}`.trim();
         } else if (language.id === 7) {
-          runCmd = `sqlite3 -header -column /box/db.sqlite < '${entryPoint}'`.trim();
+          runCmd = `sqlite3 -header -column 'file:/box/db.sqlite?nolock=1' < '${entryPoint}'`.trim();
         } else {
           runCmd = `${language.run_cmd} ${argsStr}`.trim();
         }

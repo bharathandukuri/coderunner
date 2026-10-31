@@ -577,7 +577,7 @@ class DockerExecutor {
             runCmd = `node '${jsFile}' ${argsStr}`.trim();
           } else if (language.id === 7) {
             // SQLite
-            runCmd = `sqlite3 -header -column /box/db.sqlite < '${entryPoint}'`.trim();
+            runCmd = `sqlite3 -header -column 'file:/box/db.sqlite?nolock=1' < '${entryPoint}'`.trim();
           } else if (language.id === 8 || language.id === 9) {
             // PostgreSQL / MySQL
             runCmd = `node /opt/runner/runner.js '/box/${entryPoint}' ${wall_time_limit}`.trim();

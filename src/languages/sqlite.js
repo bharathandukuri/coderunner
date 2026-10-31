@@ -7,7 +7,7 @@ export default {
   is_archived: false,
   source_file: "query.sql",
   compile_cmd: null,
-  run_cmd: "sqlite3 -header -column /box/db.sqlite < query.sql",
+  run_cmd: "sqlite3 -header -column 'file:/box/db.sqlite?nolock=1' < query.sql",
   image: "coderunner/sqlite:3",
   default_time_limit: 5,
   max_time_limit: 30,
