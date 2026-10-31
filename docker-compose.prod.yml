@@ -71,7 +71,9 @@ services:
           memory: ${WORKER_MEMORY:-4G}
 
   docker-proxy:
-    image: tecnativa/docker-socket-proxy:latest
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    networks:
+      - docker-socket-net
     environment:
       - CONTAINERS=1
       - POST=1
@@ -98,6 +100,9 @@ services:
       context: .
       dockerfile: docker/worker/Dockerfile
     command: node src/queue/worker.js
+    networks:
+      - default
+      - docker-socket-net
     environment:
       - NODE_ENV=production
       - REDIS_URL=redis://redis:6379
@@ -163,3 +168,9 @@ volumes:
   grafana_data:
   caddy_data:
   caddy_config:
+
+networks:
+  default:
+  docker-socket-net:
+    internal: true
+

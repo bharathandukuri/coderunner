@@ -34,6 +34,7 @@ Deliver a secure, low-latency code execution engine capable of executing arbitra
 - Enforces `ReadonlyRootfs`, dropped Linux capabilities (`CapDrop: ALL`), and `no-new-privileges`.
 - Memory isolation with swap disabled, CPU quota limits, and PID execution bounds.
 - Path traversal defense preventing writes outside the working `/box` directory.
+- **Security Boundary**: Docker socket proxy restricts the worker's API surface (read-only for unneeded endpoints, no volumes/swarm/nodes/secrets); defense-in-depth within the host, not a tenant-isolation boundary. Multi-tenant isolation requires separate host VMs.
 
 ### 4. Language Support
 - Clean sequential language identifiers:

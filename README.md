@@ -23,6 +23,7 @@ CodeRunner is designed strictly as a **pure execution engine**—it compiles and
   - Read-only root filesystem with isolated in-memory `tmpfs` mounts for `/box` and `/tmp`.
   - Strict resource limits: CPU quotas, memory caps with swap disabled, and PID limits.
   - Full network isolation (`NetworkDisabled: true`, `NetworkMode: 'none'`).
+  - **Docker Socket Proxy Security Boundary**: Docker socket proxy restricts the worker's API surface (read-only for unneeded endpoints, no volumes/swarm/nodes/secrets); defense-in-depth within the host, not a tenant-isolation boundary. Multi-tenant isolation requires separate host VMs.
 - **Production Architecture**:
   - Dual BullMQ job queues: `submissions` for isolate code workers, and `submissions-db` for dedicated database workers (`worker-db`).
   - Dynamic instance heartbeats in Redis with safe orphan sweeping (skips prune if Redis is down).
