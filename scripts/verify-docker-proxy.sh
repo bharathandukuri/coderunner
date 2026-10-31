@@ -85,7 +85,7 @@ fi
 EXEC_START_RESP=$(curl -s -X POST \
   -H "Content-Type: application/json" \
   -d '{"Detach":false,"Tty":false}' \
-  "${PROXY_URL}/exec/${EXEC_ID}/start")
+  "${PROXY_URL}/exec/${EXEC_ID}/start" | tr -d '\000')
 
 if [[ "$EXEC_START_RESP" != *"docker_proxy_exec_ok"* ]]; then
   echo "[ERROR] Exec did not return expected output. Output: $EXEC_START_RESP" >&2
