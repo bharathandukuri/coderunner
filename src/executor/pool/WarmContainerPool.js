@@ -5,6 +5,7 @@ import config, { getPoolConcurrency } from '../../utils/config.js';
 import logger from '../../utils/logger.js';
 import { createDockerClient } from '../../utils/dockerClient.js';
 import { getLanguageById, getAllLanguages } from '../../languages/index.js';
+import { buildContainerConfig } from '../containerConfig.js';
 import {
   recordPoolDepth,
   recordPoolWaiters,
@@ -139,8 +140,8 @@ export class WarmContainerPool {
 
       for (const [image, langs] of imageGroups) {
         const maxMinMemory = Math.max(...langs.map(l => l.min_memory || 0));
-        const effectiveMemory = Math.max(maxMinMemory, config.execution.defaultMemoryLimit || 256000);
-        const maxPidsLimit = Math.max(...langs.map(l => l.pids_limit || config.execution.maxProcesses || 64));
+        const effectiveMemory = Math.max(maxMinMemory, 256000);
+        const maxPidsLimit = Math.max(...langs.map(l => l.pids_limit || 0), 64);
         const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
         const name = langs.map(l => (l.name || '').split(/[\s(]/)[0].toLowerCase()).join('_');
 
@@ -416,9 +417,14 @@ export class WarmContainerPool {
         return await this.createOnDemandContainer(languageId, submission);
       }
 
+      // Check if request limits are outside what container.update can express (C4 / A6)
+      const reqMem = submission && submission.memory_limit;
+      const exceedsPool = reqMem && reqMem > (pool.effectiveMemory || 256000);
+      const isUnexpressibleMem = reqMem && reqMem < 4096; // Docker minimum limit is 4MB
       const isCustom = submission && (
         submission.enable_network ||
-        (submission.memory_limit && submission.memory_limit > (pool.effectiveMemory || 256000))
+        exceedsPool ||
+        isUnexpressibleMem
       );
       const poolEmpty = pool.available.length === 0;
       const circuitOpen = pool.circuitState === 'open' && Date.now() < pool.circuitOpenUntil;
@@ -443,6 +449,9 @@ export class WarmContainerPool {
           recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000);
           recordPoolDepth(pool.name, pool.available.length);
           this.checkReplenish(languageId);
+          if (!isDbDaemon && submission) {
+            await this.applyResourceLimits(container, submission, lang);
+          }
           return container;
         }
       } catch {
@@ -498,13 +507,16 @@ export class WarmContainerPool {
       }, this.acquireTimeoutMs);
 
       waiter = {
-        resolve: (container) => {
+        resolve: async (container) => {
           if (settled) {
             return false;
           }
           settled = true;
           clearTimeout(timer);
           recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000);
+          if (!isDbDaemon && submission) {
+            await this.applyResourceLimits(container, submission, lang);
+          }
           resolve(container);
           return true;
         },
@@ -522,6 +534,35 @@ export class WarmContainerPool {
 
       this.checkReplenish(languageId);
     });
+  }
+
+  /**
+   * Apply request resource limits to a claimed pooled container via container.update (C4)
+   */
+  async applyResourceLimits(container, submission, lang) {
+    if (!container || !submission) return;
+    const updateOpts = {};
+    const reqMemKb = submission.memory_limit != null
+      ? Math.max(submission.memory_limit, lang?.min_memory || 0)
+      : null;
+    const reqPids = submission.max_processes_and_or_threads;
+
+    if (reqMemKb != null && reqMemKb > 0) {
+      const bytes = reqMemKb * 1024;
+      updateOpts.Memory = bytes;
+      updateOpts.MemorySwap = bytes;
+    }
+    if (reqPids != null && reqPids > 0) {
+      updateOpts.PidsLimit = reqPids;
+    }
+
+    if (Object.keys(updateOpts).length > 0 && typeof container.update === 'function') {
+      try {
+        await container.update(updateOpts);
+      } catch (err) {
+        logger.warn({ event: 'container_update_failed', id: container.id, error: err.message });
+      }
+    }
   }
 
   /**
@@ -739,47 +780,13 @@ export class WarmContainerPool {
     const isDaemon = !!pool.isDaemon;
 
     try {
-      const containerConfig = {
-        Image: pool.image,
-        WorkingDir: '/box',
-        NetworkDisabled: true,
-        Labels: {
-          'com.coderunner.pool': 'true',
-          'com.coderunner.instance_id': this.instanceId,
-          'com.coderunner.worker_slot': this.instanceId,
-          'com.coderunner.created_at': Date.now().toString(),
-          'com.coderunner.language': pool.name,
-        },
-        HostConfig: {
-          NetworkMode: 'none',
-          ...(config.docker.runtime ? { Runtime: config.docker.runtime } : {}),
-          ReadonlyRootfs: true,
-          CapDrop: ['ALL'],
-          SecurityOpt: ['no-new-privileges:true'],
-          Memory: pool.memoryLimit || 512 * 1024 * 1024,
-          MemorySwap: pool.memoryLimit || 512 * 1024 * 1024,
-          CpuPeriod: 100000,
-          CpuQuota: 100000,
-          PidsLimit: pool.pidsLimit || 64,
-        },
-      };
-
-      if (isDaemon) {
-        if (pool.user) containerConfig.User = pool.user;
-        containerConfig.HostConfig.Tmpfs = {
-          '/box': 'rw,exec,nosuid,size=256m,mode=1777',
-          '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
-        };
-      } else {
-        containerConfig.Cmd = ['/bin/sh', '-c', 'sleep infinity'];
-        containerConfig.Tty = false;
-        containerConfig.OpenStdin = true;
-        containerConfig.HostConfig.Tmpfs = {
-          '/box': 'rw,exec,nosuid,size=256m,mode=1777',
-          '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
-          '/home': 'rw,noexec,nosuid,size=16m,mode=1777',
-        };
-      }
+      const containerConfig = buildContainerConfig({
+        language: getLanguageById(languageId),
+        pool,
+        instanceId: this.instanceId,
+        isDaemon,
+        isPool: true,
+      });
 
       container = await this.docker.createContainer(containerConfig);
       await container.start();
@@ -807,52 +814,19 @@ export class WarmContainerPool {
   }
 
   /**
-   * Create an isolated on-demand container for unpooled or custom submissions
+   * Create an isolated on-demand container for unpooled or custom submissions (C3)
    */
   async createOnDemandContainer(languageId, submission = {}) {
     const lang = submission.language || getLanguageById(languageId);
-    const { memory_limit, max_processes_and_or_threads, enable_network } = submission;
-
-    const isDb = lang ? lang.category === 'database' : false;
-    const effectiveMemory = isDb
-      ? 512000
-      : (memory_limit ? Math.max(memory_limit, (lang?.min_memory || 256000)) : (lang?.min_memory || 256000));
-    const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
-
-    const container = await this.docker.createContainer({
-      Image: lang ? lang.image : `coderunner/language:${languageId}`,
-      Cmd: ['/bin/sh', '-c', 'sleep infinity'],
-      WorkingDir: '/box',
-      NetworkDisabled: !enable_network,
-      Labels: {
-        'com.coderunner.pool': 'false',
-        'com.coderunner.on_demand': 'true',
-        'com.coderunner.instance_id': this.instanceId,
-        'com.coderunner.worker_slot': this.instanceId,
-        'com.coderunner.created_at': Date.now().toString(),
-        'com.coderunner.language': lang ? (lang.name || '').toLowerCase() : String(languageId),
-      },
-      HostConfig: {
-        Memory: effectiveMemory * 1024,
-        MemorySwap: effectiveMemory * 1024,
-        CpuPeriod: 100000,
-        CpuQuota: 100000,
-        PidsLimit: max_processes_and_or_threads || 64,
-        NetworkMode: enable_network ? 'bridge' : 'none',
-        ReadonlyRootfs: true,
-        SecurityOpt: ['no-new-privileges:true'],
-        CapDrop: ['ALL'],
-        ...(config.docker.runtime ? { Runtime: config.docker.runtime } : {}),
-        Tmpfs: {
-          '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
-          '/box': `rw,exec,nosuid,size=${boxSize}m,mode=1777`,
-          '/home': 'rw,noexec,nosuid,size=16m,mode=1777',
-        },
-      },
-      Tty: false,
-      OpenStdin: true,
+    const containerConfig = buildContainerConfig({
+      language: lang,
+      submission,
+      instanceId: this.instanceId,
+      isDaemon: Boolean(lang && lang.category === 'database' && lang.is_daemon),
+      isPool: false,
     });
 
+    const container = await this.docker.createContainer(containerConfig);
     await container.start();
     if (container && container.id) {
       this.trackedOnDemandIds.add(container.id);

@@ -42,6 +42,10 @@ function createMockDocker(options = {}) {
           container.removeOpts = removeOpts;
           return { id };
         },
+        update: async (updateOpts) => {
+          container.updatedOpts = updateOpts;
+          return updateOpts;
+        },
         inspect: async () => ({
           State: { Running: container.running },
         }),

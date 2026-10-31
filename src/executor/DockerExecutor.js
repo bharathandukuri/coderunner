@@ -10,9 +10,9 @@ import { createDockerClient } from '../utils/dockerClient.js';
 const MULTI_FILE_LANGUAGE_ID = 89;
 
 class DockerExecutor {
-  constructor() {
-    this.docker = createDockerClient();
-    this.pool = getWarmPool(this.docker);
+  constructor(docker, pool) {
+    this.docker = docker || createDockerClient();
+    this.pool = pool || getWarmPool(this.docker);
     this.resultParser = new ResultParser();
   }
 
@@ -44,11 +44,19 @@ class DockerExecutor {
 
     try {
       const doExecute = async () => {
-        container = await this.pool.acquire(submission);
+        const acquired = await this.pool.acquire(submission);
 
+        // C1: If deadline expired while acquire() was pending, release container immediately
         if (deadlineExpired) {
+          if (acquired) {
+            await this.pool.release(acquired);
+          }
           throw new Error('Overall job deadline exceeded');
         }
+        container = acquired;
+
+        // C5: Pool wait time is not counted against the user's time limit; timers start after acquire
+        logger.debug({ event: 'container_acquired_timers_started', token: submission.token });
 
         if (language.id === MULTI_FILE_LANGUAGE_ID) {
           // Multi-file program: extract ZIP, then run compile/run scripts
@@ -198,63 +206,6 @@ class DockerExecutor {
     );
 
     return this.resultParser.parse(result, submission);
-  }
-
-  /**
-   * Create a Docker container with security limits
-   */
-  async createContainer(submission) {
-    const { language, memory_limit, max_processes_and_or_threads, enable_network } = submission;
-
-    // Use at least the language's minimum memory (e.g. tsc needs ~400MB)
-    const effectiveMemory = memory_limit ? Math.max(memory_limit, language.min_memory || 0) : (language.min_memory || 0);
-
-    const boxSize = effectiveMemory > 0 ? Math.max(Math.ceil(effectiveMemory / 1024), 128) : 256; // at least 128MB for /box
-
-    const containerConfig = {
-      Image: language.image,
-      Cmd: ['/bin/sh', '-c', 'sleep 3600'], // Keep container alive
-      WorkingDir: '/box',
-      // User is set in Dockerfile for each language image
-      NetworkDisabled: !enable_network,
-      HostConfig: {
-        Memory: effectiveMemory > 0 ? effectiveMemory * 1024 : 0, // Convert KB to bytes, or 0 for unlimited
-        MemorySwap: effectiveMemory > 0 ? effectiveMemory * 1024 : 0, // Disable swap, or 0 for unlimited
-        CpuPeriod: 100000,
-        CpuQuota: 100000, // 1 CPU
-        PidsLimit: max_processes_and_or_threads,
-        NetworkMode: enable_network ? 'bridge' : 'none',
-        ReadonlyRootfs: true,
-        SecurityOpt: ['no-new-privileges'],
-        CapDrop: ['ALL'],
-        ...(config.docker.runtime ? { Runtime: config.docker.runtime } : {}),
-        MaskedPaths: [
-          '/etc/passwd', '/etc/shadow', '/etc/group', '/etc/gshadow',
-          '/etc/hostname', '/etc/hosts', '/etc/resolv.conf',
-          '/proc/kcore', '/proc/keys', '/proc/latency_stats',
-          '/proc/timer_list', '/proc/timer_stats', '/proc/sched_debug',
-          '/proc/scsi', '/proc/acpi', '/proc/bus',
-          '/proc/1/environ', '/proc/1/cmdline', '/proc/1/maps',
-          '/sys/firmware', '/sys/devices',
-        ],
-        ReadonlyPaths: ['/proc', '/sys'],
-        // mode=1777 is required: every language image runs as a non-root user
-        // (see docker/images/*/Dockerfile), and a tmpfs defaults to root-owned
-        // 0755 — without this the sandbox user cannot write its source file or
-        // its compile artifacts into /box.
-        Tmpfs: {
-          '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
-          '/box': `rw,exec,nosuid,size=${boxSize}m,mode=1777`,
-          '/home': 'rw,noexec,nosuid,size=16m,mode=1777',
-        },
-        Binds: [],
-      },
-      Tty: false,
-      OpenStdin: true,
-      StdinOnce: true,
-    };
-
-    return await this.docker.createContainer(containerConfig);
   }
 
   /**
@@ -476,174 +427,205 @@ class DockerExecutor {
   async executeMulti(submission) {
     const { language, files, executions, compileOrder, compiler_options } = submission;
     let container = null;
-    const isPooled = (language.id === 8 || language.id === 9);
+    const isPooled = language.category === 'database' && Boolean(language.is_daemon);
+
+    const maxTotalWallTime = submission.max_total_wall_time_limit || 60;
+    const acquireBudget = 15;
+    const graceBudget = isPooled ? 3 : 5;
+    const overallDeadlineMs = (acquireBudget + maxTotalWallTime + graceBudget) * 1000;
+
+    let deadlineTimeout = null;
+    let deadlineExpired = false;
+
+    const deadlinePromise = new Promise((_, reject) => {
+      deadlineTimeout = setTimeout(() => {
+        deadlineExpired = true;
+        reject(new Error(`Overall multi-file deadline exceeded (${overallDeadlineMs / 1000}s)`));
+      }, overallDeadlineMs);
+    });
 
     try {
-      const isDatabase = language.id === 7 || language.id === 8 || language.id === 9;
-      const memLimits = executions.map(e => e.memory_limit).filter(m => m != null);
-      const effectiveMultiMemory = isDatabase ? null : (memLimits.length > 0 ? Math.max(...memLimits) : 256000);
+      const doExecuteMulti = async () => {
+        const isDatabase = language.category === 'database';
+        const memLimits = executions.map(e => e.memory_limit).filter(m => m != null);
+        const effectiveMultiMemory = isDatabase ? null : (memLimits.length > 0 ? Math.max(...memLimits) : 256000);
 
-      const containerSubmission = {
-        language,
-        memory_limit: effectiveMultiMemory,
-        max_processes_and_or_threads: Math.max(...executions.map(e => e.max_processes_and_or_threads || 64), 64),
-        enable_network: submission.enable_network || false,
-      };
+        const containerSubmission = {
+          language,
+          memory_limit: effectiveMultiMemory,
+          max_processes_and_or_threads: Math.max(...executions.map(e => e.max_processes_and_or_threads || 64), 64),
+          enable_network: submission.enable_network || false,
+        };
 
-      container = await this.pool.acquire(containerSubmission);
+        const acquired = await this.pool.acquire(containerSubmission);
 
-      // 2. Write all files to /box
-      for (const file of files) {
-        await this.writeFileToBox(container, file.path, file.content);
-      }
+        // C1: If deadline expired while acquire() was pending, release container immediately
+        if (deadlineExpired) {
+          if (acquired) {
+            await this.pool.release(acquired);
+          }
+          throw new Error('Overall job deadline exceeded');
+        }
+        container = acquired;
 
-      // 3. Optional compilation step if the language requires it
-      let compileResultSummary = null;
-      if (language.compile_cmd) {
-        // Determine compile file order
-        let compileFiles = [];
-        if (compileOrder && Array.isArray(compileOrder) && compileOrder.length > 0) {
-          compileFiles = compileOrder;
-        } else {
-          // Use files array preserving order, filtered by relevant source extensions
-          const sourceExts = ['.java', '.cpp', '.c', '.cc', '.cxx', '.ts'];
-          compileFiles = files
-            .map(f => f.path)
-            .filter(p => sourceExts.some(ext => p.endsWith(ext)));
+        // C5: Pool wait time is not counted against the user's time limit; timers start after acquire
+        logger.debug({ event: 'container_acquired_for_multi_execution', token: submission.token });
+
+        // 2. Write all files to /box
+        for (const file of files) {
+          await this.writeFileToBox(container, file.path, file.content);
         }
 
-        let compileCmd = '';
-        if (language.id === 3) {
-          // Java
-          compileCmd = `javac -cp .:/usr/local/lib/java/* ${compileFiles.map(f => `'${f}'`).join(' ')}`;
-        } else if (language.id === 2) {
-          // C++
-          compileCmd = `g++ -O2 -std=c++17 -I/usr/local/include -o main ${compileFiles.map(f => `'${f}'`).join(' ')}`;
-        } else if (language.id === 1) {
-          // C
-          compileCmd = `gcc -O2 -std=c11 -o main ${compileFiles.map(f => `'${f}'`).join(' ')}`;
-        } else if (language.id === 6) {
-          // TypeScript
-          compileCmd = `tsc ${compileFiles.map(f => `'${f}'`).join(' ')} --outDir . --esModuleInterop --skipLibCheck`;
-        } else {
-          compileCmd = language.compile_cmd;
-        }
+        // 3. Optional compilation step if the language requires it
+        let compileResultSummary = null;
+        if (language.compile_cmd) {
+          // Determine compile file order
+          let compileFiles = [];
+          if (compileOrder && Array.isArray(compileOrder) && compileOrder.length > 0) {
+            compileFiles = compileOrder;
+          } else {
+            // Use files array preserving order, filtered by relevant source extensions
+            const sourceExts = ['.java', '.cpp', '.c', '.cc', '.cxx', '.ts'];
+            compileFiles = files
+              .map(f => f.path)
+              .filter(p => sourceExts.some(ext => p.endsWith(ext)));
+          }
 
-        if (compiler_options) {
-          compileCmd += ` ${compiler_options}`;
-        }
+          let compileCmd = '';
+          if (language.id === 3) {
+            // Java
+            compileCmd = `javac -cp .:/usr/local/lib/java/* ${compileFiles.map(f => `'${f}'`).join(' ')}`;
+          } else if (language.id === 2) {
+            // C++
+            compileCmd = `g++ -O2 -std=c++17 -I/usr/local/include -o main ${compileFiles.map(f => `'${f}'`).join(' ')}`;
+          } else if (language.id === 1) {
+            // C
+            compileCmd = `gcc -O2 -std=c11 -o main ${compileFiles.map(f => `'${f}'`).join(' ')}`;
+          } else if (language.id === 6) {
+            // TypeScript
+            compileCmd = `tsc ${compileFiles.map(f => `'${f}'`).join(' ')} --outDir . --esModuleInterop --skipLibCheck`;
+          } else {
+            compileCmd = language.compile_cmd;
+          }
 
-        const maxCompileTime = Math.max(...executions.map(e => (e.cpu_time_limit || 5) + (e.cpu_extra_time || 1)));
-        const compileRes = await this.runCommand(container, compileCmd, null, maxCompileTime, '');
+          if (compiler_options) {
+            compileCmd += ` ${compiler_options}`;
+          }
 
-        if (compileRes.exitCode !== 0) {
-          // Compilation failed - short-circuit immediately
-          return {
-            status: getStatusById(6), // Compilation Error
-            compile: {
-              status: getStatusById(6),
-              output: compileRes.stderr || compileRes.stdout,
-              time: compileRes.time,
-              wall_time: compileRes.wallTime,
-            },
-            executions: executions.map(e => ({
-              entryPoint: e.entryPoint,
-              status: getStatusById(6),
-              stdout: null,
-              stderr: null,
-              exit_code: null,
-              exit_signal: null,
-              time: null,
-              wall_time: null,
-              memory: null,
-            })),
+          const maxCompileTime = Math.max(...executions.map(e => (e.cpu_time_limit || 5) + (e.cpu_extra_time || 1)));
+          const compileRes = await this.runCommand(container, compileCmd, null, maxCompileTime, '');
+
+          if (compileRes.exitCode !== 0) {
+            // Compilation failed - short-circuit immediately
+            return {
+              status: getStatusById(6), // Compilation Error
+              compile: {
+                status: getStatusById(6),
+                output: compileRes.stderr || compileRes.stdout,
+                time: compileRes.time,
+                wall_time: compileRes.wallTime,
+              },
+              executions: executions.map(e => ({
+                entryPoint: e.entryPoint,
+                status: getStatusById(6),
+                stdout: null,
+                stderr: null,
+                exit_code: null,
+                exit_signal: null,
+                time: null,
+                wall_time: null,
+                memory: null,
+              })),
+            };
+          }
+
+          compileResultSummary = {
+            status: getStatusById(3), // Accepted
+            output: compileRes.stdout || null,
+            time: compileRes.time,
+            wall_time: compileRes.wallTime,
           };
         }
 
-        compileResultSummary = {
-          status: getStatusById(3), // Accepted
-          output: compileRes.stdout || null,
-          time: compileRes.time,
-          wall_time: compileRes.wallTime,
-        };
-      }
+        // 4. Run each execution sequentially in the same sandbox
+        const executionResults = [];
+        let overallStatus = getStatusById(3); // Default Accepted
 
-      // 4. Run each execution sequentially in the same sandbox
-      const executionResults = [];
-      let overallStatus = getStatusById(3); // Default Accepted
+        for (const execConfig of executions) {
+          const { entryPoint, stdin = '', args = [], wall_time_limit = 5 } = execConfig;
 
-      for (const execConfig of executions) {
-        const { entryPoint, stdin = '', args = [], wall_time_limit = 5 } = execConfig;
+          // Build execution command for entryPoint
+          let runCmd = '';
+          const argsStr = args.map(a => `'${a}'`).join(' ');
 
-        // Build execution command for entryPoint
-        let runCmd = '';
-        const argsStr = args.map(a => `'${a}'`).join(' ');
+          if (language.id === 3) {
+            // Java: entryPoint could be "Main.java" or "Main" or "pkg/Main.java"
+            let className = entryPoint.replace(/\.java$/, '').replace(/\//g, '.');
+            runCmd = `java -cp .:/usr/local/lib/java/* ${className} ${argsStr}`.trim();
+          } else if (language.id === 2 || language.id === 1) {
+            // C / C++: compiled binary is ./main
+            runCmd = `./main ${argsStr}`.trim();
+          } else if (language.id === 5) {
+            // Python
+            runCmd = `python3 '${entryPoint}' ${argsStr}`.trim();
+          } else if (language.id === 4) {
+            // JavaScript
+            runCmd = `node '${entryPoint}' ${argsStr}`.trim();
+          } else if (language.id === 6) {
+            // TypeScript (compiled to .js)
+            const jsFile = entryPoint.replace(/\.ts$/, '.js');
+            runCmd = `node '${jsFile}' ${argsStr}`.trim();
+          } else if (language.id === 7) {
+            // SQLite
+            runCmd = `sqlite3 -header -column /box/db.sqlite < '${entryPoint}'`.trim();
+          } else if (language.id === 8 || language.id === 9) {
+            // PostgreSQL / MySQL
+            runCmd = `node /opt/runner/runner.js '/box/${entryPoint}' ${wall_time_limit}`.trim();
+          } else {
+            runCmd = `${language.run_cmd} ${argsStr}`.trim();
+          }
 
-        if (language.id === 3) {
-          // Java: entryPoint could be "Main.java" or "Main" or "pkg/Main.java"
-          let className = entryPoint.replace(/\.java$/, '').replace(/\//g, '.');
-          runCmd = `java -cp .:/usr/local/lib/java/* ${className} ${argsStr}`.trim();
-        } else if (language.id === 2 || language.id === 1) {
-          // C / C++: compiled binary is ./main
-          runCmd = `./main ${argsStr}`.trim();
-        } else if (language.id === 5) {
-          // Python
-          runCmd = `python3 '${entryPoint}' ${argsStr}`.trim();
-        } else if (language.id === 4) {
-          // JavaScript
-          runCmd = `node '${entryPoint}' ${argsStr}`.trim();
-        } else if (language.id === 6) {
-          // TypeScript (compiled to .js)
-          const jsFile = entryPoint.replace(/\.ts$/, '.js');
-          runCmd = `node '${jsFile}' ${argsStr}`.trim();
-        } else if (language.id === 7) {
-          // SQLite
-          runCmd = `sqlite3 -header -column /box/db.sqlite < '${entryPoint}'`.trim();
-        } else if (language.id === 8 || language.id === 9) {
-          // PostgreSQL / MySQL
-          runCmd = `node /opt/runner/runner.js '/box/${entryPoint}' ${wall_time_limit}`.trim();
-        } else {
-          runCmd = `${language.run_cmd} ${argsStr}`.trim();
+          const runResult = await this.runCommand(
+            container,
+            runCmd,
+            { isDatabase: isPooled, max_file_size: execConfig.max_file_size },
+            wall_time_limit,
+            stdin
+          );
+          const parsed = this.resultParser.parse(runResult, {
+            redirect_stderr_to_stdout: submission.redirect_stderr_to_stdout,
+          });
+
+          const executionItem = {
+            entryPoint,
+            status: parsed.status,
+            stdout: parsed.stdout,
+            stderr: parsed.stderr,
+            exit_code: parsed.exit_code,
+            exit_signal: parsed.exit_signal,
+            time: parsed.time,
+            wall_time: parsed.wall_time,
+            memory: parsed.memory,
+          };
+
+          executionResults.push(executionItem);
+
+          // Per requirement: If an execution times out or crashes fatally (non-zero or timed out),
+          // kill container and fail the remaining executions
+          if (runResult.timedOut || parsed.status.id !== 3) {
+            overallStatus = parsed.status;
+            break;
+          }
         }
 
-        const runResult = await this.runCommand(
-          container,
-          runCmd,
-          { isDatabase: isPooled, max_file_size: execConfig.max_file_size },
-          wall_time_limit,
-          stdin
-        );
-        const parsed = this.resultParser.parse(runResult, {
-          redirect_stderr_to_stdout: submission.redirect_stderr_to_stdout,
-        });
-
-        const executionItem = {
-          entryPoint,
-          status: parsed.status,
-          stdout: parsed.stdout,
-          stderr: parsed.stderr,
-          exit_code: parsed.exit_code,
-          exit_signal: parsed.exit_signal,
-          time: parsed.time,
-          wall_time: parsed.wall_time,
-          memory: parsed.memory,
+        return {
+          status: overallStatus,
+          compile: compileResultSummary,
+          executions: executionResults,
         };
-
-        executionResults.push(executionItem);
-
-        // Per requirement: If an execution times out or crashes fatally (non-zero or timed out),
-        // kill container and fail the remaining executions
-        if (runResult.timedOut || parsed.status.id !== 3) {
-          overallStatus = parsed.status;
-          break;
-        }
-      }
-
-      return {
-        status: overallStatus,
-        compile: compileResultSummary,
-        executions: executionResults,
       };
+
+      return await Promise.race([doExecuteMulti(), deadlinePromise]);
     } catch (error) {
       logger.error({
         event: 'multi_execution_docker_error',
@@ -658,6 +640,7 @@ class DockerExecutor {
         executions: [],
       };
     } finally {
+      if (deadlineTimeout) clearTimeout(deadlineTimeout);
       if (container) {
         this.pool.release(container);
       }
