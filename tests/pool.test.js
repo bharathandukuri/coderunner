@@ -1268,5 +1268,53 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       setQueues(null, null);
     }
   });
+
+  it('31. MAX_BATCH_SIZE configuration: validates batch submission according to configured batch size ceiling', async () => {
+    const { validateBatchRun, getBatchRunSchema } = await import('../src/api/middleware/validation.js');
+    const config = (await import('../src/utils/config.js')).default;
+    const savedBatchSize = config.execution.maxBatchSize;
+
+    try {
+      config.execution.maxBatchSize = 5;
+      const schema = getBatchRunSchema(5);
+
+      const validBatch = Array.from({ length: 5 }, () => ({
+        source_code: 'print(1)',
+        language_id: 5,
+      }));
+      const { error: validErr } = schema.validate({ submissions: validBatch });
+      assert.strictEqual(validErr, undefined, '5 submissions must pass schema with maxBatchSize=5');
+
+      const invalidBatch = Array.from({ length: 6 }, () => ({
+        source_code: 'print(1)',
+        language_id: 5,
+      }));
+      const { error: invalidErr } = schema.validate({ submissions: invalidBatch });
+      assert(invalidErr, '6 submissions must fail schema with maxBatchSize=5');
+
+      // Middleware test with mock req/res
+      let middlewarePassed = false;
+      let statusCode = 0;
+      let responseBody = null;
+      const mockReq = { body: { submissions: invalidBatch } };
+      const mockRes = {
+        status(code) {
+          statusCode = code;
+          return this;
+        },
+        json(data) {
+          responseBody = data;
+          return this;
+        },
+      };
+
+      validateBatchRun(mockReq, mockRes, () => { middlewarePassed = true; });
+      assert.strictEqual(middlewarePassed, false, 'Middleware should block batch exceeding maxBatchSize');
+      assert.strictEqual(statusCode, 422, 'Should respond with 422 Unprocessable Entity');
+      assert(responseBody?.message?.includes('contain less than or equal to 5 items'));
+    } finally {
+      config.execution.maxBatchSize = savedBatchSize;
+    }
+  });
 });
 

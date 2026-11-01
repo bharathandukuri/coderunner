@@ -602,11 +602,12 @@ router.get('/batch', async (req, res, next) => {
     }
 
     const tokenList = tokens.split(',').map(t => t.trim()).filter(Boolean);
+    const maxBatch = config.execution?.maxBatchSize || 20;
 
-    if (tokenList.length > 20) {
+    if (tokenList.length > maxBatch) {
       return res.status(400).json({
         error: 'Bad Request',
-        message: 'Maximum 20 tokens allowed',
+        message: `Maximum ${maxBatch} tokens allowed`,
       });
     }
 

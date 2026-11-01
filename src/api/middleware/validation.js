@@ -61,10 +61,13 @@ const runSchema = Joi.object({
 });
 
 // Batch run validation
-const batchRunSchema = Joi.object({
-  runs: Joi.array().items(runSchema).min(1).max(20),
-  submissions: Joi.array().items(runSchema).min(1).max(20),
-}).or('runs', 'submissions');
+export function getBatchRunSchema(maxBatch = config.execution?.maxBatchSize || 20) {
+  return Joi.object({
+    runs: Joi.array().items(runSchema).min(1).max(maxBatch),
+    submissions: Joi.array().items(runSchema).min(1).max(maxBatch),
+  }).or('runs', 'submissions');
+}
+export const batchRunSchema = getBatchRunSchema();
 
 // Multi-file run schema
 const multiFileRunSchema = Joi.object({
@@ -149,10 +152,13 @@ const multiFileRunSchema = Joi.object({
 });
 
 // Batch multi-file run validation
-const batchMultiFileRunSchema = Joi.object({
-  runs: Joi.array().items(multiFileRunSchema).min(1).max(20),
-  submissions: Joi.array().items(multiFileRunSchema).min(1).max(20),
-}).or('runs', 'submissions');
+export function getBatchMultiFileRunSchema(maxBatch = config.execution?.maxBatchSize || 20) {
+  return Joi.object({
+    runs: Joi.array().items(multiFileRunSchema).min(1).max(maxBatch),
+    submissions: Joi.array().items(multiFileRunSchema).min(1).max(maxBatch),
+  }).or('runs', 'submissions');
+}
+export const batchMultiFileRunSchema = getBatchMultiFileRunSchema();
 
 /**
  * Validate run request
@@ -181,7 +187,8 @@ export const validateSubmission = validateRun;
  * Validate batch run request
  */
 export function validateBatchRun(req, res, next) {
-  const { error, value } = batchRunSchema.validate(req.body, {
+  const schema = getBatchRunSchema(config.execution?.maxBatchSize || 20);
+  const { error, value } = schema.validate(req.body, {
     abortEarly: false,
     stripUnknown: true,
   });
@@ -238,7 +245,8 @@ export function validateMultiRun(req, res, next) {
  * Validate batch multi-file run request
  */
 export function validateBatchMultiRun(req, res, next) {
-  const { error, value } = batchMultiFileRunSchema.validate(req.body, {
+  const schema = getBatchMultiFileRunSchema(config.execution?.maxBatchSize || 20);
+  const { error, value } = schema.validate(req.body, {
     abortEarly: false,
     stripUnknown: true,
   });

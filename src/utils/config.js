@@ -24,6 +24,7 @@ const config = {
     defaultMemoryLimit: parseInt(process.env.DEFAULT_MEMORY_LIMIT) || 128000,
     maxMemoryLimit: parseInt(process.env.MAX_MEMORY_LIMIT) || 512000,
     maxProcesses: parseInt(process.env.MAX_PROCESSES) || 60,
+    maxBatchSize: process.env.MAX_BATCH_SIZE ? parseInt(process.env.MAX_BATCH_SIZE, 10) : 20,
     maxSourceSize: parseInt(process.env.MAX_SOURCE_SIZE) || 65536,
     maxAdditionalFilesSize: parseInt(process.env.MAX_ADDITIONAL_FILES_SIZE) || 2097152, // 2MB base64
     defaultStackLimit: parseInt(process.env.DEFAULT_STACK_LIMIT) || 64000,

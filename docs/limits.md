@@ -156,6 +156,7 @@ The table below catalogs every environment variable controlling capacity, concur
 | `GRAFANA_SITE_ADDRESS`             | `localhost:3001`                     | Compose    | Bind address for Grafana web interface                                          |
 | `INSTANCE_ID`                      | `worker-<uuid>`                      | Worker     | Unique worker identifier used for container tagging and orphan cleanup          |
 | `MAX_ADDITIONAL_FILES_SIZE`        | `2097152`                            | Sandbox    | Maximum size (bytes) of auxiliary files submitted with code (2 MB)              |
+| `MAX_BATCH_SIZE`                   | `20`                                 | API        | Maximum number of submissions allowed in a single batch request                 |
 | `MAX_CONCURRENT_WAIT_REQUESTS`     | `concurrency * 25`                   | API        | Maximum simultaneous HTTP requests holding long-poll connections (`?wait=true`) |
 | `MAX_CPU_TIME_LIMIT`               | `15`                                 | Sandbox    | Upper ceiling for client-requested CPU time limit (seconds)                     |
 | `MAX_MEMORY_LIMIT`                 | `512000`                             | Sandbox    | Upper ceiling for client-requested RAM limit in kilobytes (512 MB)              |
