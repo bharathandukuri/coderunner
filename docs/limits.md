@@ -43,33 +43,37 @@ The formulas below are derived directly from empirical `docker stats` measuremen
 
 ### Measured Service & Container Footprints
 
-| Component | Idle RAM | Active / Peak RAM | Description |
-|---|---|---|---|
-| **Core Base Stack** | ~150 MiB | ~170 MiB | Caddy (18 MiB), API (41 MiB), Worker (40 MiB), Worker-DB (39 MiB), Redis (6 MiB), Docker-Proxy (4 MiB) |
-| **Monitoring Profile** | ~210 MiB | ~260 MiB | Prometheus (70 MiB), Grafana (56 MiB), cAdvisor (42 MiB), Alertmanager (18 MiB), Node-Exporter (14 MiB), Redis-Exporter (10 MiB) |
-| **Host OS Baseline** | ~350 MiB | ~350 MiB | Kernel, systemd, journald, SSH, Docker daemon |
-| **PostgreSQL 16 Container** | ~57 MiB | ~75 MiB | Single isolated warm PostgreSQL instance |
-| **MySQL 8.4 Container** | ~243 MiB | ~280 MiB | Single isolated warm MySQL instance with Performance Schema off |
-| **Isolate Code Job** | 0 MiB | ~15–30 MiB | Process in Linux namespaces (allocated on demand, released immediately) |
-| **Docker Code Container** | ~25 MiB | ~45–128 MiB | Cold or pooled language runner container |
+| Component                   | Idle RAM | Active / Peak RAM | Description                                                                                                                      |
+| --------------------------- | -------- | ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **Core Base Stack**         | ~150 MiB | ~170 MiB          | Caddy (18 MiB), API (41 MiB), Worker (40 MiB), Worker-DB (39 MiB), Redis (6 MiB), Docker-Proxy (4 MiB)                           |
+| **Monitoring Profile**      | ~210 MiB | ~260 MiB          | Prometheus (70 MiB), Grafana (56 MiB), cAdvisor (42 MiB), Alertmanager (18 MiB), Node-Exporter (14 MiB), Redis-Exporter (10 MiB) |
+| **Host OS Baseline**        | ~350 MiB | ~350 MiB          | Kernel, systemd, journald, SSH, Docker daemon                                                                                    |
+| **PostgreSQL 16 Container** | ~57 MiB  | ~75 MiB           | Single isolated warm PostgreSQL instance                                                                                         |
+| **MySQL 8.4 Container**     | ~243 MiB | ~280 MiB          | Single isolated warm MySQL instance with Performance Schema off                                                                  |
+| **Isolate Code Job**        | 0 MiB    | ~15–30 MiB        | Process in Linux namespaces (allocated on demand, released immediately)                                                          |
+| **Docker Code Container**   | ~25 MiB  | ~45–128 MiB       | Cold or pooled language runner container                                                                                         |
 
 ### Formulas
 
 #### Minimum Required RAM
+
 $$\text{RAM}_{\text{min}} = \text{Base} + (\text{Workers} \times \text{Concurrency} \times \text{RAM}_{\text{job}}) + \sum (\text{PoolSize}_{e} \times \text{RAM}_{\text{pool},e})$$
 
 Where:
+
 - $\text{Base} = 500\text{ MiB}$ without monitoring, or $710\text{ MiB}$ with `ENABLE_MONITORING=true`.
 - $\text{RAM}_{\text{job}} = 30\text{ MiB}$ for Isolate workers, or $128\text{ MiB}$ for Docker code workers.
 - $\text{RAM}_{\text{pool},\text{pg}} = 75\text{ MiB}$ per PostgreSQL container.
 - $\text{RAM}_{\text{pool},\text{my}} = 280\text{ MiB}$ per MySQL container.
 
 #### Minimum Required vCPU
+
 $$\text{vCPU}_{\text{min}} = \max\left(1, \left\lceil \frac{\text{Workers} \times \text{Concurrency}}{\text{OvercommitFactor}} \right\rceil\right)$$
 
 Where $\text{OvercommitFactor}$ is typically $2.0$ for compute-heavy workloads or $4.0$ for database workloads spending significant time waiting on disk I/O.
 
 ### Swap Recommendation
+
 - **Recommendation**: Configure a swapfile equal to **50% to 100% of physical RAM** (e.g. 1 GB to 2 GB swap on a 2 GB host).
 - **Reasoning**: Without swap, transient spikes in database memory or concurrent container boots trigger the Linux Out-Of-Memory (OOM) killer immediately, abruptly terminating `dockerd`, `redis`, or `worker`. With swap, transient allocations page to disk safely without process termination, while container memory limits (`DEFAULT_MEMORY_LIMIT`, `API_MEMORY`, etc.) continue to constrain user jobs. However, continuous sustained load must fit entirely within physical RAM to avoid disk thrashing.
 
@@ -81,12 +85,12 @@ The following table details recommended configurations and measured throughput l
 
 > **Measurement Standard**: All figures cited below are from raw benchmark log files committed in `docs/benchmarks/`. Cells marked **TODO: not measured** represent unverified configurations where physical VM benchmarks have not yet been executed.
 
-| Cloud VM Tier | Recommended Settings | Code-Only (Isolate) Max RPS | Code-Only (Docker) Max RPS | DB-Only (PG+MySQL) Max RPS | Mixed (70% Code / 30% DB) Max RPS | Source Citation |
-|---|---|---|---|---|---|---|
-| **1 vCPU / 2 GB RAM**<br>*(t3.small, e2-small, cx22)* | `WORKER_CONCURRENCY=2`<br>`POSTGRES_POOL_SIZE=2`<br>`MYSQL_POOL_SIZE=2`<br>`MAX_QUEUE_DEPTH=50`<br>`RATE_LIMIT_SUBMISSIONS_MAX=60` | TODO: not measured | TODO: not measured | TODO: not measured | **0.67 req/s**<br>*(p50: 464ms, p95: 735ms, 100% pass)* | [docs/benchmarks/ec2-t3-small-sustained.md](benchmarks/ec2-t3-small-sustained.md) |
-| **2 vCPU / 4 GB RAM**<br>*(t3.medium, e2-medium, cx32)* | `WORKER_CONCURRENCY=4`<br>`POSTGRES_POOL_SIZE=4`<br>`MYSQL_POOL_SIZE=4`<br>`MAX_QUEUE_DEPTH=100`<br>`RATE_LIMIT_SUBMISSIONS_MAX=120` | TODO: not measured | TODO: not measured | TODO: not measured | TODO: not measured | Untested on dedicated VM |
-| **4 vCPU / 8 GB RAM**<br>*(t3.xlarge, e2-standard-4, cx42)* | `WORKER_CONCURRENCY=8`<br>`POSTGRES_POOL_SIZE=6`<br>`MYSQL_POOL_SIZE=6`<br>`MAX_QUEUE_DEPTH=200`<br>`RATE_LIMIT_SUBMISSIONS_MAX=240` | TODO: not measured | TODO: not measured | TODO: not measured | TODO: not measured | Untested on dedicated VM |
-| **8 vCPU / 16 GB RAM**<br>*(c6i.2xlarge, etc.)* | `WORKER_CONCURRENCY=16`<br>`POSTGRES_POOL_SIZE=10`<br>`MYSQL_POOL_SIZE=10`<br>`MAX_QUEUE_DEPTH=400`<br>`RATE_LIMIT_SUBMISSIONS_MAX=500` | TODO: not measured | TODO: not measured | TODO: not measured | TODO: not measured | Untested on dedicated VM |
+| Cloud VM Tier                                               | Recommended Settings                                                                                                                    | Code-Only (Isolate) Max RPS | Code-Only (Docker) Max RPS | DB-Only (PG+MySQL) Max RPS | Mixed (70% Code / 30% DB) Max RPS                       | Source Citation                                                                   |
+| ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | -------------------------- | -------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| **1 vCPU / 2 GB RAM**<br>_(t3.small, e2-small, cx22)_       | `WORKER_CONCURRENCY=2`<br>`POSTGRES_POOL_SIZE=2`<br>`MYSQL_POOL_SIZE=2`<br>`MAX_QUEUE_DEPTH=50`<br>`RATE_LIMIT_SUBMISSIONS_MAX=60`      | TODO: not measured          | TODO: not measured         | TODO: not measured         | **0.67 req/s**<br>_(Highest rate survived; degraded on burst, locked up >1 RPS)_ | [docs/benchmarks/ec2-t3-small-sustained.md](benchmarks/ec2-t3-small-sustained.md) |
+| **2 vCPU / 4 GB RAM**<br>_(t3.medium, e2-medium, cx32)_     | `WORKER_CONCURRENCY=4`<br>`POSTGRES_POOL_SIZE=4`<br>`MYSQL_POOL_SIZE=4`<br>`MAX_QUEUE_DEPTH=100`<br>`RATE_LIMIT_SUBMISSIONS_MAX=120`    | TODO: not measured          | TODO: not measured         | TODO: not measured         | TODO: not measured                                      | Untested on dedicated VM                                                          |
+| **4 vCPU / 8 GB RAM**<br>_(t3.xlarge, e2-standard-4, cx42)_ | `WORKER_CONCURRENCY=8`<br>`POSTGRES_POOL_SIZE=6`<br>`MYSQL_POOL_SIZE=6`<br>`MAX_QUEUE_DEPTH=200`<br>`RATE_LIMIT_SUBMISSIONS_MAX=240`    | TODO: not measured          | TODO: not measured         | TODO: not measured         | TODO: not measured                                      | Untested on dedicated VM                                                          |
+| **8 vCPU / 16 GB RAM**<br>_(c6i.2xlarge, etc.)_             | `WORKER_CONCURRENCY=16`<br>`POSTGRES_POOL_SIZE=10`<br>`MYSQL_POOL_SIZE=10`<br>`MAX_QUEUE_DEPTH=400`<br>`RATE_LIMIT_SUBMISSIONS_MAX=500` | TODO: not measured          | TODO: not measured         | TODO: not measured         | TODO: not measured                                      | Untested on dedicated VM                                                          |
 
 ---
 
@@ -114,83 +118,83 @@ When incoming load exceeds server sizing boundaries, CoderRunner degrades predic
 
 The table below catalogs every environment variable controlling capacity, concurrency, resources, timeouts, and daemon behavior.
 
-| Variable | Default | Component | Description & Operational Impact |
-|---|---|---|---|
-| `ALERTMANAGER_PIDS_LIMIT` | `100` | Compose | Process count ceiling for Alertmanager container |
-| `ALERT_WEBHOOK_URL` | `http://localhost:5001/` | Compose | Webhook receiver endpoint for Alertmanager notifications |
-| `API_BASE_URL` | `http://localhost:3000` | API | Canonical base URL for API self-reference |
-| `API_CPUS` | `1.0` | Compose | Maximum CPU allocation for the Express API container |
-| `API_MEMORY` | `512M` | Compose | Memory ceiling for Express API container |
-| `API_PIDS_LIMIT` | `200` | Compose | Maximum process count for Express API container |
-| `AUTH_HEADERS` | `X-Auth-Token x-rapidapi-key` | API | Space-separated list of accepted HTTP header names for authentication |
-| `AUTH_TOKEN` | *(empty / open)* | API | Space-separated list of valid bearer tokens for API authentication |
-| `BODY_LIMIT` | `5mb` | API | Maximum allowed payload size for HTTP request bodies |
-| `CADDY_CPUS` | `1.0` | Compose | Maximum CPU allocation for the Caddy edge proxy container |
-| `CADDY_MEMORY` | `256M` | Compose | Memory ceiling for Caddy container |
-| `CADDY_PIDS_LIMIT` | `100` | Compose | Maximum process count for Caddy container |
-| `CADVISOR_PIDS_LIMIT` | `200` | Compose | Process count ceiling for cAdvisor container |
-| `CODERUNNER_IMAGE_NAMESPACE` | `coderunner` | Compose | Docker image namespace prefix for runner images |
-| `CODERUNNER_VERSION` | `latest` | Compose | Version tag for custom runner images |
-| `COMPILE_CPU_TIME_LIMIT` | `15` | Sandbox | Default CPU time limit (seconds) for compilation step (C++, Java) |
-| `COMPILE_WALL_TIME_LIMIT` | `30` | Sandbox | Default wall-clock time limit (seconds) for compilation step |
-| `CONTAINER_TIMEOUT` | `30000` | Worker | Hard timeout (milliseconds) for container execution and acquire waits |
-| `DEFAULT_CPU_TIME_LIMIT` | `5` | Sandbox | Default CPU time limit (seconds) per submission if unspecified |
-| `DEFAULT_MEMORY_LIMIT` | `128000` | Sandbox | Default memory limit in kilobytes (128 MB) per submission |
-| `DEFAULT_STACK_LIMIT` | `64000` | Sandbox | Default stack limit in kilobytes (64 MB) for Isolate |
-| `DEFAULT_WALL_TIME_LIMIT` | `10` | Sandbox | Default wall-clock time limit (seconds) per submission if unspecified |
-| `DOCKER_HOST` | *(empty)* | Worker | Remote Docker daemon TCP socket URL (e.g. `tcp://docker-proxy:2375`) |
-| `DOCKER_PROXY_PIDS_LIMIT` | `50` | Compose | Process count ceiling for docker-socket-proxy container |
-| `DOCKER_RUNTIME` | *(empty / runc)* | Worker | Alternative Docker runtime engine (e.g. `runsc` for gVisor sandboxing) |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Worker | Path to Docker UNIX domain socket |
-| `DOMAIN` | `localhost` | Compose | Public domain name configured in Caddy for automatic TLS |
-| `ENABLE_LANGUAGE_POOL` | `false` | Worker | Enables warm container pooling for standard programming languages |
-| `GF_SERVER_ROOT_URL` | `%(protocol)s://%(domain)s/grafana/` | Compose | Grafana subpath routing configuration |
-| `GRAFANA_CPUS` | `0.5` | Compose | CPU ceiling for Grafana container |
-| `GRAFANA_MEMORY` | `512M` | Compose | Memory ceiling for Grafana container |
-| `GRAFANA_PASSWORD` | `admin` | Compose | Initial administrator password for Grafana |
-| `GRAFANA_PIDS_LIMIT` | `100` | Compose | Process count ceiling for Grafana container |
-| `GRAFANA_SITE_ADDRESS` | `localhost:3001` | Compose | Bind address for Grafana web interface |
-| `INSTANCE_ID` | `worker-<uuid>` | Worker | Unique worker identifier used for container tagging and orphan cleanup |
-| `MAX_ADDITIONAL_FILES_SIZE` | `2097152` | Sandbox | Maximum size (bytes) of auxiliary files submitted with code (2 MB) |
-| `MAX_CONCURRENT_WAIT_REQUESTS` | `concurrency * 25` | API | Maximum simultaneous HTTP requests holding long-poll connections (`?wait=true`) |
-| `MAX_CPU_TIME_LIMIT` | `15` | Sandbox | Upper ceiling for client-requested CPU time limit (seconds) |
-| `MAX_MEMORY_LIMIT` | `512000` | Sandbox | Upper ceiling for client-requested RAM limit in kilobytes (512 MB) |
-| `MAX_PROCESSES` | `60` | Sandbox | Process / thread ceiling per submission inside Isolate |
-| `MAX_QUEUE_DEPTH` | `concurrency * 25` | API | BullMQ queue backlog limit before API returns HTTP 503 backpressure |
-| `MAX_SOURCE_SIZE` | `65536` | Sandbox | Maximum source code string size in bytes (64 KB) |
-| `MAX_WALL_TIME_LIMIT` | `30` | Sandbox | Upper ceiling for client-requested wall-clock time limit (seconds) |
-| `MYSQL_POOL_SIZE` | `2` | Worker | Target idle warm container depth for MySQL 8.4 database |
-| `NODE_ENV` | `development` | All | Node.js environment mode (`production` or `development`) |
-| `NODE_EXPORTER_PIDS_LIMIT` | `50` | Compose | Process count ceiling for node-exporter container |
-| `POOL_ACQUIRE_TIMEOUT_MS` | `10000` | Worker | Milliseconds to wait for a warm container before timing out |
-| `POOL_MAX_WAITERS` | `16` | Worker | Maximum queued requests waiting for a warm container |
-| `PORT` | `3000` | API | TCP listen port for the Express application |
-| `POSTGRES_POOL_SIZE` | `2` | Worker | Target idle warm container depth for PostgreSQL 16 database |
-| `PROMETHEUS_CPUS` | `0.5` | Compose | CPU allocation ceiling for Prometheus container |
-| `PROMETHEUS_MEMORY` | `512M` | Compose | Memory limit for Prometheus container |
-| `PROMETHEUS_PIDS_LIMIT` | `100` | Compose | Process count ceiling for Prometheus container |
-| `PROMETHEUS_RETENTION` | `15d` | Compose | Time duration metrics are retained on disk by Prometheus |
-| `RATE_LIMIT_MAX_REQUESTS` | `100` | API | Maximum general API requests allowed per client IP within rate limit window |
-| `RATE_LIMIT_SUBMISSIONS_MAX` | `120` | API | Maximum submissions allowed per client IP within submissions window |
-| `RATE_LIMIT_SUBMISSIONS_WINDOW_MS`| `60000` | API | Duration (milliseconds) of submissions rate limiting window (1 minute) |
-| `RATE_LIMIT_WINDOW_MS` | `60000` | API | Duration (milliseconds) of general rate limiting window (1 minute) |
-| `REDIS_CPUS` | `1.0` | Compose | CPU ceiling for Redis container |
-| `REDIS_EXPORTER_PIDS_LIMIT` | `50` | Compose | Process count ceiling for redis-exporter container |
-| `REDIS_MAXMEMORY` | `256mb` | Compose | Memory ceiling for Redis before rejecting writes with noeviction |
-| `REDIS_MEMORY` | `512M` | Compose | Docker cgroup memory limit for Redis container |
-| `REDIS_PIDS_LIMIT` | `100` | Compose | Maximum process count for Redis container |
-| `REDIS_URL` | `redis://localhost:6379`| API/Worker | Redis connection URL for BullMQ queues |
-| `RESULT_CACHE_TTL` | `3600` | API | Duration (seconds) execution results remain cached in Redis |
-| `RETRY_AFTER_SECONDS` | `5` | API | Header value returned to clients when HTTP 503 backpressure triggers |
-| `TRUST_PROXY` | `1` | API | Enables Express `trust proxy` to read `X-Forwarded-For` from reverse proxy |
-| `WARM_POOL_MAX_CONCURRENT_BOOTS` | `3` | Worker | Maximum simultaneous Docker container boots allowed across warm pools |
-| `WORKER_CONCURRENCY` | `4` | Worker | Number of simultaneous jobs processed by the code execution worker |
-| `WORKER_CPUS` | `2.0` | Compose | CPU ceiling for code execution worker container |
-| `WORKER_DB_CONCURRENCY` | `2` | Worker | Number of simultaneous jobs processed by the database worker |
-| `WORKER_DB_CPUS` | `2.0` | Compose | CPU ceiling for database worker container |
-| `WORKER_DB_MEMORY` | `2048M` | Compose | Memory ceiling for database worker container |
-| `WORKER_DB_PIDS_LIMIT` | `300` | Compose | Process ceiling for database worker container |
-| `WORKER_MEMORY` | `1024M` | Compose | Memory ceiling for code execution worker container |
-| `WORKER_METRICS_PORT` | `null` | Worker | Dedicated port for worker Prometheus metrics if separate from API |
-| `WORKER_PIDS_LIMIT` | `300` | Compose | Process ceiling for code execution worker container |
-| `WORKER_TYPE` | `all` | Worker | Worker role: `all` (handles both), `isolate`, or `docker` |
+| Variable                           | Default                              | Component  | Description & Operational Impact                                                |
+| ---------------------------------- | ------------------------------------ | ---------- | ------------------------------------------------------------------------------- |
+| `ALERTMANAGER_PIDS_LIMIT`          | `100`                                | Compose    | Process count ceiling for Alertmanager container                                |
+| `ALERT_WEBHOOK_URL`                | `http://localhost:5001/`             | Compose    | Webhook receiver endpoint for Alertmanager notifications                        |
+| `API_BASE_URL`                     | `http://localhost:3000`              | API        | Canonical base URL for API self-reference                                       |
+| `API_CPUS`                         | `1.0`                                | Compose    | Maximum CPU allocation for the Express API container                            |
+| `API_MEMORY`                       | `512M`                               | Compose    | Memory ceiling for Express API container                                        |
+| `API_PIDS_LIMIT`                   | `200`                                | Compose    | Maximum process count for Express API container                                 |
+| `AUTH_HEADERS`                     | `X-Auth-Token x-rapidapi-key`        | API        | Space-separated list of accepted HTTP header names for authentication           |
+| `AUTH_TOKEN`                       | _(empty / open)_                     | API        | Space-separated list of valid bearer tokens for API authentication              |
+| `BODY_LIMIT`                       | `5mb`                                | API        | Maximum allowed payload size for HTTP request bodies                            |
+| `CADDY_CPUS`                       | `1.0`                                | Compose    | Maximum CPU allocation for the Caddy edge proxy container                       |
+| `CADDY_MEMORY`                     | `256M`                               | Compose    | Memory ceiling for Caddy container                                              |
+| `CADDY_PIDS_LIMIT`                 | `100`                                | Compose    | Maximum process count for Caddy container                                       |
+| `CADVISOR_PIDS_LIMIT`              | `200`                                | Compose    | Process count ceiling for cAdvisor container                                    |
+| `CODERUNNER_IMAGE_NAMESPACE`       | `coderunner`                         | Compose    | Docker image namespace prefix for runner images                                 |
+| `CODERUNNER_VERSION`               | `latest`                             | Compose    | Version tag for custom runner images                                            |
+| `COMPILE_CPU_TIME_LIMIT`           | `15`                                 | Sandbox    | Default CPU time limit (seconds) for compilation step (C++, Java)               |
+| `COMPILE_WALL_TIME_LIMIT`          | `30`                                 | Sandbox    | Default wall-clock time limit (seconds) for compilation step                    |
+| `CONTAINER_TIMEOUT`                | `30000`                              | Worker     | Hard timeout (milliseconds) for container execution and acquire waits           |
+| `DEFAULT_CPU_TIME_LIMIT`           | `5`                                  | Sandbox    | Default CPU time limit (seconds) per submission if unspecified                  |
+| `DEFAULT_MEMORY_LIMIT`             | `128000`                             | Sandbox    | Default memory limit in kilobytes (128 MB) per submission                       |
+| `DEFAULT_STACK_LIMIT`              | `64000`                              | Sandbox    | Default stack limit in kilobytes (64 MB) for Isolate                            |
+| `DEFAULT_WALL_TIME_LIMIT`          | `10`                                 | Sandbox    | Default wall-clock time limit (seconds) per submission if unspecified           |
+| `DOCKER_HOST`                      | _(empty)_                            | Worker     | Remote Docker daemon TCP socket URL (e.g. `tcp://docker-proxy:2375`)            |
+| `DOCKER_PROXY_PIDS_LIMIT`          | `50`                                 | Compose    | Process count ceiling for docker-socket-proxy container                         |
+| `DOCKER_RUNTIME`                   | _(empty / runc)_                     | Worker     | Alternative Docker runtime engine (e.g. `runsc` for gVisor sandboxing)          |
+| `DOCKER_SOCKET`                    | `/var/run/docker.sock`               | Worker     | Path to Docker UNIX domain socket                                               |
+| `DOMAIN`                           | `localhost`                          | Compose    | Public domain name configured in Caddy for automatic TLS                        |
+| `ENABLE_LANGUAGE_POOL`             | `false`                              | Worker     | Enables warm container pooling for standard programming languages               |
+| `GF_SERVER_ROOT_URL`               | `%(protocol)s://%(domain)s/grafana/` | Compose    | Grafana subpath routing configuration                                           |
+| `GRAFANA_CPUS`                     | `0.5`                                | Compose    | CPU ceiling for Grafana container                                               |
+| `GRAFANA_MEMORY`                   | `512M`                               | Compose    | Memory ceiling for Grafana container                                            |
+| `GRAFANA_PASSWORD`                 | `admin`                              | Compose    | Initial administrator password for Grafana                                      |
+| `GRAFANA_PIDS_LIMIT`               | `100`                                | Compose    | Process count ceiling for Grafana container                                     |
+| `GRAFANA_SITE_ADDRESS`             | `localhost:3001`                     | Compose    | Bind address for Grafana web interface                                          |
+| `INSTANCE_ID`                      | `worker-<uuid>`                      | Worker     | Unique worker identifier used for container tagging and orphan cleanup          |
+| `MAX_ADDITIONAL_FILES_SIZE`        | `2097152`                            | Sandbox    | Maximum size (bytes) of auxiliary files submitted with code (2 MB)              |
+| `MAX_CONCURRENT_WAIT_REQUESTS`     | `concurrency * 25`                   | API        | Maximum simultaneous HTTP requests holding long-poll connections (`?wait=true`) |
+| `MAX_CPU_TIME_LIMIT`               | `15`                                 | Sandbox    | Upper ceiling for client-requested CPU time limit (seconds)                     |
+| `MAX_MEMORY_LIMIT`                 | `512000`                             | Sandbox    | Upper ceiling for client-requested RAM limit in kilobytes (512 MB)              |
+| `MAX_PROCESSES`                    | `60`                                 | Sandbox    | Process / thread ceiling per submission inside Isolate                          |
+| `MAX_QUEUE_DEPTH`                  | `concurrency * 25`                   | API        | BullMQ queue backlog limit before API returns HTTP 503 backpressure             |
+| `MAX_SOURCE_SIZE`                  | `65536`                              | Sandbox    | Maximum source code string size in bytes (64 KB)                                |
+| `MAX_WALL_TIME_LIMIT`              | `30`                                 | Sandbox    | Upper ceiling for client-requested wall-clock time limit (seconds)              |
+| `MYSQL_POOL_SIZE`                  | `2`                                  | Worker     | Target idle warm container depth for MySQL 8.4 database                         |
+| `NODE_ENV`                         | `development`                        | All        | Node.js environment mode (`production` or `development`)                        |
+| `NODE_EXPORTER_PIDS_LIMIT`         | `50`                                 | Compose    | Process count ceiling for node-exporter container                               |
+| `POOL_ACQUIRE_TIMEOUT_MS`          | `10000`                              | Worker     | Milliseconds to wait for a warm container before timing out                     |
+| `POOL_MAX_WAITERS`                 | `16`                                 | Worker     | Maximum queued requests waiting for a warm container                            |
+| `PORT`                             | `3000`                               | API        | TCP listen port for the Express application                                     |
+| `POSTGRES_POOL_SIZE`               | `2`                                  | Worker     | Target idle warm container depth for PostgreSQL 16 database                     |
+| `PROMETHEUS_CPUS`                  | `0.5`                                | Compose    | CPU allocation ceiling for Prometheus container                                 |
+| `PROMETHEUS_MEMORY`                | `512M`                               | Compose    | Memory limit for Prometheus container                                           |
+| `PROMETHEUS_PIDS_LIMIT`            | `100`                                | Compose    | Process count ceiling for Prometheus container                                  |
+| `PROMETHEUS_RETENTION`             | `15d`                                | Compose    | Time duration metrics are retained on disk by Prometheus                        |
+| `RATE_LIMIT_MAX_REQUESTS`          | `100`                                | API        | Maximum general API requests allowed per client IP within rate limit window     |
+| `RATE_LIMIT_SUBMISSIONS_MAX`       | `120`                                | API        | Maximum submissions allowed per client IP within submissions window             |
+| `RATE_LIMIT_SUBMISSIONS_WINDOW_MS` | `60000`                              | API        | Duration (milliseconds) of submissions rate limiting window (1 minute)          |
+| `RATE_LIMIT_WINDOW_MS`             | `60000`                              | API        | Duration (milliseconds) of general rate limiting window (1 minute)              |
+| `REDIS_CPUS`                       | `1.0`                                | Compose    | CPU ceiling for Redis container                                                 |
+| `REDIS_EXPORTER_PIDS_LIMIT`        | `50`                                 | Compose    | Process count ceiling for redis-exporter container                              |
+| `REDIS_MAXMEMORY`                  | `256mb`                              | Compose    | Memory ceiling for Redis before rejecting writes with noeviction                |
+| `REDIS_MEMORY`                     | `512M`                               | Compose    | Docker cgroup memory limit for Redis container                                  |
+| `REDIS_PIDS_LIMIT`                 | `100`                                | Compose    | Maximum process count for Redis container                                       |
+| `REDIS_URL`                        | `redis://localhost:6379`             | API/Worker | Redis connection URL for BullMQ queues                                          |
+| `RESULT_CACHE_TTL`                 | `3600`                               | API        | Duration (seconds) execution results remain cached in Redis                     |
+| `RETRY_AFTER_SECONDS`              | `5`                                  | API        | Header value returned to clients when HTTP 503 backpressure triggers            |
+| `TRUST_PROXY`                      | `1`                                  | API        | Enables Express `trust proxy` to read `X-Forwarded-For` from reverse proxy      |
+| `WARM_POOL_MAX_CONCURRENT_BOOTS`   | `3`                                  | Worker     | Maximum simultaneous Docker container boots allowed across warm pools           |
+| `WORKER_CONCURRENCY`               | `4`                                  | Worker     | Number of simultaneous jobs processed by the code execution worker              |
+| `WORKER_CPUS`                      | `2.0`                                | Compose    | CPU ceiling for code execution worker container                                 |
+| `WORKER_DB_CONCURRENCY`            | `2`                                  | Worker     | Number of simultaneous jobs processed by the database worker                    |
+| `WORKER_DB_CPUS`                   | `2.0`                                | Compose    | CPU ceiling for database worker container                                       |
+| `WORKER_DB_MEMORY`                 | `2048M`                              | Compose    | Memory ceiling for database worker container                                    |
+| `WORKER_DB_PIDS_LIMIT`             | `300`                                | Compose    | Process ceiling for database worker container                                   |
+| `WORKER_MEMORY`                    | `1024M`                              | Compose    | Memory ceiling for code execution worker container                              |
+| `WORKER_METRICS_PORT`              | `null`                               | Worker     | Dedicated port for worker Prometheus metrics if separate from API               |
+| `WORKER_PIDS_LIMIT`                | `300`                                | Compose    | Process ceiling for code execution worker container                             |
+| `WORKER_TYPE`                      | `all`                                | Worker     | Worker role: `all` (handles both), `isolate`, or `docker`                       |
