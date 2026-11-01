@@ -1131,9 +1131,10 @@ describe('CodeRunner API', () => {
           source_code: `db.getSiblingDB('admin').shutdownServer();`,
         }),
       });
-      assert.strictEqual(res.status, 422);
+      assert.strictEqual(res.status, 201);
       const data = await res.json();
-      assert.match(data.message, /forbidden language construct/i);
+      assert.strictEqual(data.status.id, 6);
+      assert(data.compile_output.includes('Rejected'));
     });
 
     it('enforces time limit for infinite loop (TLE)', async () => {
@@ -1166,27 +1167,32 @@ describe('CodeRunner API', () => {
     });
 
     it('supports multi-file project with state across files', async () => {
-      const res = await fetch(`${BASE_URL}/multi/submissions?wait=true`, {
+      const res = await fetch(`${BASE_URL}/submissions/multi?wait=true`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
           language_id: 10,
           files: [
             {
-              name: 'seed.js',
+              path: 'seed.js',
               content: `db.coll.insertOne({ status: 'ok' });`,
             },
             {
-              name: 'query.js',
+              path: 'query.js',
               content: `printjson(db.coll.findOne({}, { _id: 0 }));`,
             },
+          ],
+          executions: [
+            { entryPoint: 'seed.js' },
+            { entryPoint: 'query.js' },
           ],
         }),
       });
       assert.strictEqual(res.status, 201);
       const data = await res.json();
       assert.strictEqual(data.status.id, 3); // Accepted
-      assert.match(data.stdout, /ok/);
+      assert.strictEqual(data.executions.length, 2);
+      assert.match(data.executions[1].stdout, /ok/);
     });
   });
 });

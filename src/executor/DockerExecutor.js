@@ -581,6 +581,8 @@ class DockerExecutor {
           } else if (language.runner === 'sql-driver') {
             // PostgreSQL / MySQL
             runCmd = `node /opt/runner/runner.js '/box/${entryPoint}' ${wall_time_limit}`.trim();
+          } else if (language.source_file && language.run_cmd && language.run_cmd.includes(language.source_file)) {
+            runCmd = `${language.run_cmd.replace(language.source_file, entryPoint)} ${argsStr}`.trim();
           } else {
             runCmd = `${language.run_cmd} ${argsStr}`.trim();
           }

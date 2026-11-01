@@ -7,7 +7,7 @@ export const MASKED_PATHS = [
   '/proc/timer_list', '/proc/timer_stats', '/proc/sched_debug',
   '/proc/scsi', '/proc/acpi', '/proc/bus',
   '/proc/1/environ', '/proc/1/cmdline', '/proc/1/maps',
-  '/sys/firmware', '/sys/devices',
+  '/sys/firmware',
 ];
 
 export const READONLY_PATHS = ['/proc', '/sys'];
