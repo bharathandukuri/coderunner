@@ -159,9 +159,10 @@ The table below catalogs every environment variable controlling capacity, concur
 | `MAX_BATCH_SIZE`                   | `20`                                 | API        | Maximum number of submissions allowed in a single batch request                 |
 | `MAX_CONCURRENT_WAIT_REQUESTS`     | `concurrency * 25`                   | API        | Maximum simultaneous HTTP requests holding long-poll connections (`?wait=true`) |
 | `MAX_CPU_TIME_LIMIT`               | `15`                                 | Sandbox    | Upper ceiling for client-requested CPU time limit (seconds)                     |
+| `MAX_DB_QUEUE_DEPTH`               | `concurrency * 5`                    | API        | BullMQ backlog limit for database queue (DB throughput x tolerated wait) before returning HTTP 503 |
 | `MAX_MEMORY_LIMIT`                 | `512000`                             | Sandbox    | Upper ceiling for client-requested RAM limit in kilobytes (512 MB)              |
 | `MAX_PROCESSES`                    | `60`                                 | Sandbox    | Process / thread ceiling per submission inside Isolate                          |
-| `MAX_QUEUE_DEPTH`                  | `concurrency * 25`                   | API        | BullMQ queue backlog limit before API returns HTTP 503 backpressure             |
+| `MAX_QUEUE_DEPTH`                  | `concurrency * 25`                   | API        | BullMQ backlog limit for code queue (submissions) before returning HTTP 503 backpressure |
 | `MAX_SOURCE_SIZE`                  | `65536`                              | Sandbox    | Maximum source code string size in bytes (64 KB)                                |
 | `MAX_WALL_TIME_LIMIT`              | `30`                                 | Sandbox    | Upper ceiling for client-requested wall-clock time limit (seconds)              |
 | `MONGODB_POOL_SIZE`                | `2`                                  | Worker     | Target idle warm container depth for MongoDB 8.0 database                       |

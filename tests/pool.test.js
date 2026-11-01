@@ -1349,5 +1349,157 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     await pool.release(acquired);
     await pool.shutdown();
   });
+
+  it('33. Per-queue backpressure: checks target queue, names full queue in 503, and startup validation', async () => {
+    const { backpressureMiddleware } = await import('../src/api/routes/submissions.js');
+    const { setQueues, SUBMISSIONS_QUEUE, DB_SUBMISSIONS_QUEUE } = await import('../src/queue/producer.js');
+    const { validateQueueDepthEnv } = await import('../src/utils/config.js');
+    const config = (await import('../src/utils/config.js')).default;
+
+    const savedMaxQueue = config.queue.maxQueueDepth;
+    const savedMaxDbQueue = config.queue.maxDbQueueDepth;
+
+    try {
+      config.queue.maxQueueDepth = 5;
+      config.queue.maxDbQueueDepth = 2;
+
+      // Scenario 1: DB queue is full (2 items waiting), code queue is empty (0 waiting)
+      const mockCodeQueue = {
+        getWaitingCount: async () => 0,
+        getActiveCount: async () => 0,
+        getCompletedCount: async () => 0,
+        getFailedCount: async () => 0,
+      };
+      const mockDbQueue = {
+        getWaitingCount: async () => 2,
+        getActiveCount: async () => 0,
+        getCompletedCount: async () => 0,
+        getFailedCount: async () => 0,
+      };
+      setQueues(mockCodeQueue, mockDbQueue);
+
+      // Python submission (language_id: 5 -> submissions queue): MUST NOT be blocked by full DB queue
+      let pyNext = false;
+      const pyReq = { body: { language_id: 5 } };
+      const pyRes = {
+        status: () => pyRes,
+        json: () => pyRes,
+        set: () => {},
+      };
+      await backpressureMiddleware(pyReq, pyRes, () => { pyNext = true; });
+      assert.strictEqual(pyNext, true, 'Full DB queue must not block Python (code) submission');
+
+      // PostgreSQL submission (language_id: 8 -> submissions-db queue): MUST be rejected with 503 naming DB queue
+      let pgNext = false;
+      let pgStatus = 0;
+      let pgBody = null;
+      let pgHeaders = {};
+      const pgReq = { body: { language_id: 8 } };
+      const pgRes = {
+        set: (k, v) => { pgHeaders[k] = v; },
+        status: (code) => { pgStatus = code; return pgRes; },
+        json: (data) => { pgBody = data; return pgRes; },
+      };
+      await backpressureMiddleware(pgReq, pgRes, () => { pgNext = true; });
+      assert.strictEqual(pgNext, false, 'Full DB queue must reject PostgreSQL submission');
+      assert.strictEqual(pgStatus, 503);
+      assert.strictEqual(pgHeaders['Retry-After'], String(config.queue.retryAfterSeconds));
+      assert.strictEqual(pgBody.queue, DB_SUBMISSIONS_QUEUE);
+      assert.strictEqual(pgBody.depth, 2);
+      assert.strictEqual(pgBody.limit, 2);
+      assert(pgBody.message.includes("queue 'submissions-db'"));
+
+      // Scenario 2: Code queue is full (5 items waiting), DB queue is empty (0 waiting)
+      mockCodeQueue.getWaitingCount = async () => 5;
+      mockDbQueue.getWaitingCount = async () => 0;
+
+      // PostgreSQL submission (language_id: 8): MUST NOT be blocked by full code queue
+      let pgNext2 = false;
+      await backpressureMiddleware({ body: { language_id: 8 } }, pgRes, () => { pgNext2 = true; });
+      assert.strictEqual(pgNext2, true, 'Full code queue must not block PostgreSQL submission');
+
+      // Python submission (language_id: 5): MUST be rejected with 503 naming code queue
+      let pyNext2 = false;
+      let pyStatus = 0;
+      let pyBody = null;
+      const pyRes2 = {
+        set: () => {},
+        status: (code) => { pyStatus = code; return pyRes2; },
+        json: (data) => { pyBody = data; return pyRes2; },
+      };
+      await backpressureMiddleware({ body: { language_id: 5 } }, pyRes2, () => { pyNext2 = true; });
+      assert.strictEqual(pyNext2, false, 'Full code queue must reject Python submission');
+      assert.strictEqual(pyStatus, 503);
+      assert.strictEqual(pyBody.queue, SUBMISSIONS_QUEUE);
+      assert.strictEqual(pyBody.depth, 5);
+      assert.strictEqual(pyBody.limit, 5);
+      assert(pyBody.message.includes("queue 'submissions'"));
+
+      // Scenario 3: Mixed batch
+      // When code queue is full (5/5) and DB queue is empty (0/2)
+      // A batch with both Python (5) and Postgres (8) MUST be rejected because one target queue is full
+      let batchNext = false;
+      let batchStatus = 0;
+      let batchBody = null;
+      const batchReq = {
+        body: {
+          submissions: [
+            { language_id: 5, source_code: 'print(1)' },
+            { language_id: 8, source_code: 'SELECT 1;' },
+          ],
+        },
+      };
+      const batchRes = {
+        set: () => {},
+        status: (code) => { batchStatus = code; return batchRes; },
+        json: (data) => { batchBody = data; return batchRes; },
+      };
+      await backpressureMiddleware(batchReq, batchRes, () => { batchNext = true; });
+      assert.strictEqual(batchNext, false, 'Batch mixing both queues must be rejected if code queue is full');
+      assert.strictEqual(batchStatus, 503);
+      assert.strictEqual(batchBody.queue, SUBMISSIONS_QUEUE);
+
+      // When code queue is not full (4/5) and DB queue is not full (1/2), mixed batch passes
+      mockCodeQueue.getWaitingCount = async () => 4;
+      mockDbQueue.getWaitingCount = async () => 1;
+      let batchPass = false;
+      await backpressureMiddleware(batchReq, batchRes, () => { batchPass = true; });
+      assert.strictEqual(batchPass, true, 'Batch passes when both target queues are below their limits');
+
+      // Scenario 4: Startup validation - invalid env values make startup fail
+      assert.throws(() => {
+        validateQueueDepthEnv({ MAX_QUEUE_DEPTH: '-10' });
+      }, /MAX_QUEUE_DEPTH must be a positive integer/);
+
+      assert.throws(() => {
+        validateQueueDepthEnv({ MAX_QUEUE_DEPTH: '0' });
+      }, /MAX_QUEUE_DEPTH must be a positive integer/);
+
+      assert.throws(() => {
+        validateQueueDepthEnv({ MAX_QUEUE_DEPTH: 'invalid' });
+      }, /MAX_QUEUE_DEPTH must be a positive integer/);
+
+      assert.throws(() => {
+        validateQueueDepthEnv({ MAX_DB_QUEUE_DEPTH: '-5' });
+      }, /MAX_DB_QUEUE_DEPTH must be a positive integer/);
+
+      assert.throws(() => {
+        validateQueueDepthEnv({ MAX_DB_QUEUE_DEPTH: '0' });
+      }, /MAX_DB_QUEUE_DEPTH must be a positive integer/);
+
+      assert.throws(() => {
+        validateQueueDepthEnv({ MAX_DB_QUEUE_DEPTH: 'not-a-number' });
+      }, /MAX_DB_QUEUE_DEPTH must be a positive integer/);
+
+      // Valid env values succeed
+      const valid = validateQueueDepthEnv({ MAX_QUEUE_DEPTH: '50', MAX_DB_QUEUE_DEPTH: '15' });
+      assert.strictEqual(valid.maxQueueDepth, 50);
+      assert.strictEqual(valid.maxDbQueueDepth, 15);
+    } finally {
+      config.queue.maxQueueDepth = savedMaxQueue;
+      config.queue.maxDbQueueDepth = savedMaxDbQueue;
+      setQueues(null, null);
+    }
+  });
 });
 

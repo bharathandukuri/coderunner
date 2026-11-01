@@ -1,3 +1,23 @@
+export function parsePositiveIntEnv(envName, rawVal, defaultValue) {
+  if (rawVal === undefined || rawVal === null || rawVal === '') {
+    return defaultValue;
+  }
+  const parsed = Number(rawVal);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${envName} must be a positive integer, got ${rawVal}`);
+  }
+  return parsed;
+}
+
+const rawWorkerConcurrency = process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4;
+const baseWorkerConcurrency = (Number.isInteger(rawWorkerConcurrency) && rawWorkerConcurrency > 0) ? rawWorkerConcurrency : 4;
+
+export function validateQueueDepthEnv(env = process.env, concurrency = baseWorkerConcurrency) {
+  const maxQueueDepth = parsePositiveIntEnv('MAX_QUEUE_DEPTH', env.MAX_QUEUE_DEPTH, concurrency * 25);
+  const maxDbQueueDepth = parsePositiveIntEnv('MAX_DB_QUEUE_DEPTH', env.MAX_DB_QUEUE_DEPTH, concurrency * 5);
+  return { maxQueueDepth, maxDbQueueDepth };
+}
+
 const config = {
   server: {
     port: parseInt(process.env.PORT) || 3000,
@@ -37,8 +57,9 @@ const config = {
   },
 
   queue: {
-    maxQueueDepth: process.env.MAX_QUEUE_DEPTH ? parseInt(process.env.MAX_QUEUE_DEPTH, 10) : ((process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4) * 25),
-    maxConcurrentWaitRequests: process.env.MAX_CONCURRENT_WAIT_REQUESTS ? parseInt(process.env.MAX_CONCURRENT_WAIT_REQUESTS, 10) : ((process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4) * 25),
+    maxQueueDepth: parsePositiveIntEnv('MAX_QUEUE_DEPTH', process.env.MAX_QUEUE_DEPTH, baseWorkerConcurrency * 25),
+    maxDbQueueDepth: parsePositiveIntEnv('MAX_DB_QUEUE_DEPTH', process.env.MAX_DB_QUEUE_DEPTH, baseWorkerConcurrency * 5),
+    maxConcurrentWaitRequests: process.env.MAX_CONCURRENT_WAIT_REQUESTS ? parseInt(process.env.MAX_CONCURRENT_WAIT_REQUESTS, 10) : (baseWorkerConcurrency * 25),
     retryAfterSeconds: parseInt(process.env.RETRY_AFTER_SECONDS, 10) || 5,
   },
 

@@ -9,7 +9,7 @@ import {
   sanitizeCommandLineArgs,
 } from '../middleware/validation.js';
 import { submissionsRateLimitMiddleware } from '../middleware/rateLimit.js';
-import { addSubmission, getSubmission, deleteSubmission, getSubscriberRedis, getQueueStats } from '../../queue/producer.js';
+import { addSubmission, getSubmission, deleteSubmission, getSubscriberRedis, getQueueStats, getQueueName, SUBMISSIONS_QUEUE, DB_SUBMISSIONS_QUEUE } from '../../queue/producer.js';
 import { getLanguageById, getStatusById } from '../../languages/index.js';
 import { decodeIfNeeded, encodeIfNeeded } from '../../utils/base64.js';
 import config from '../../utils/config.js';
@@ -173,15 +173,49 @@ export function getActiveWaitCount() {
 export async function backpressureMiddleware(req, res, next) {
   try {
     const stats = await getQueueStats();
-    const waiting = stats?.submissions?.in_queue || 0;
-    const maxQueue = config.queue?.maxQueueDepth || 100;
-    if (waiting >= maxQueue) {
-      res.set('Retry-After', String(config.queue?.retryAfterSeconds || 5));
-      return res.status(503).json({
-        error: 'Service Unavailable',
-        message: `Queue depth (${waiting}) exceeds maximum capacity (${maxQueue}). Please retry later.`,
-        retry_after: config.queue?.retryAfterSeconds || 5,
-      });
+
+    // Determine target queue(s) for this request
+    const targetQueues = new Set();
+    const body = req.body;
+    if (body) {
+      const batchList = Array.isArray(body.submissions)
+        ? body.submissions
+        : (Array.isArray(body.runs) ? body.runs : null);
+
+      if (batchList && batchList.length > 0) {
+        for (const item of batchList) {
+          targetQueues.add(getQueueName(item?.language_id));
+        }
+      } else if (body.language_id !== undefined) {
+        targetQueues.add(getQueueName(body.language_id));
+      }
+    }
+
+    if (targetQueues.size === 0) {
+      targetQueues.add(SUBMISSIONS_QUEUE);
+    }
+
+    // Check each target queue against its configured soft limit
+    for (const qName of targetQueues) {
+      const isDb = qName === DB_SUBMISSIONS_QUEUE;
+      const queueLimit = isDb
+        ? (config.queue?.maxDbQueueDepth || 20)
+        : (config.queue?.maxQueueDepth || 100);
+
+      const queueDepth = stats.by_queue?.[qName]?.in_queue
+        ?? (isDb ? 0 : (stats.submissions?.in_queue || 0));
+
+      if (queueDepth >= queueLimit) {
+        res.set('Retry-After', String(config.queue?.retryAfterSeconds || 5));
+        return res.status(503).json({
+          error: 'Service Unavailable',
+          queue: qName,
+          depth: queueDepth,
+          limit: queueLimit,
+          message: `Queue depth (${queueDepth}) exceeds maximum capacity (${queueLimit}) for queue '${qName}'. Please retry later.`,
+          retry_after: config.queue?.retryAfterSeconds || 5,
+        });
+      }
     }
 
     if (req.query?.wait === 'true') {

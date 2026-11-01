@@ -90,11 +90,25 @@ export function setQueues(subQ, dbQ = null) {
 }
 
 /**
+ * Check if language routes to database queue
+ */
+export function isDbLanguage(languageId) {
+  const id = Number(languageId);
+  return id === 8 || id === 9 || id === 10;
+}
+
+/**
+ * Get queue name for language
+ */
+export function getQueueName(languageId) {
+  return isDbLanguage(languageId) ? DB_SUBMISSIONS_QUEUE : SUBMISSIONS_QUEUE;
+}
+
+/**
  * Get submission queue
  */
 export function getQueue(languageId) {
-  const id = Number(languageId);
-  if (id === 8 || id === 9) {
+  if (isDbLanguage(languageId)) {
     return dbSubmissionQueue || submissionQueue;
   }
   return submissionQueue;
@@ -115,8 +129,7 @@ export async function addSubmission(submission) {
     JSON.stringify(submission)
   );
 
-  const langId = Number(submission.language_id);
-  const isDb = langId === 8 || langId === 9;
+  const isDb = isDbLanguage(submission.language_id);
   const targetQueue = (isDb && dbSubmissionQueue) ? dbSubmissionQueue : submissionQueue;
 
   // Add job to target queue
@@ -189,29 +202,36 @@ export async function deleteSubmission(token) {
  */
 export async function getQueueStats() {
   if (!submissionQueue) {
-    return { submissions: { total: 0, in_queue: 0, processing: 0, completed: 0 } };
+    return {
+      submissions: { total: 0, in_queue: 0, processing: 0, completed: 0, failed: 0 },
+      by_queue: {
+        [SUBMISSIONS_QUEUE]: { total: 0, in_queue: 0, processing: 0, completed: 0, failed: 0 },
+        [DB_SUBMISSIONS_QUEUE]: { total: 0, in_queue: 0, processing: 0, completed: 0, failed: 0 },
+      },
+    };
   }
 
-  const queues = [submissionQueue];
-  if (dbSubmissionQueue) queues.push(dbSubmissionQueue);
+  const [codeWaiting, codeActive, codeCompleted, codeFailed] = await Promise.all([
+    submissionQueue.getWaitingCount ? submissionQueue.getWaitingCount() : 0,
+    submissionQueue.getActiveCount ? submissionQueue.getActiveCount() : 0,
+    submissionQueue.getCompletedCount ? submissionQueue.getCompletedCount() : 0,
+    submissionQueue.getFailedCount ? submissionQueue.getFailedCount() : 0,
+  ]);
 
-  let totalWaiting = 0;
-  let totalActive = 0;
-  let totalCompleted = 0;
-  let totalFailed = 0;
-
-  for (const q of queues) {
-    const [waiting, active, completed, failed] = await Promise.all([
-      q.getWaitingCount(),
-      q.getActiveCount(),
-      q.getCompletedCount(),
-      q.getFailedCount(),
+  let dbWaiting = 0, dbActive = 0, dbCompleted = 0, dbFailed = 0;
+  if (dbSubmissionQueue) {
+    [dbWaiting, dbActive, dbCompleted, dbFailed] = await Promise.all([
+      dbSubmissionQueue.getWaitingCount ? dbSubmissionQueue.getWaitingCount() : 0,
+      dbSubmissionQueue.getActiveCount ? dbSubmissionQueue.getActiveCount() : 0,
+      dbSubmissionQueue.getCompletedCount ? dbSubmissionQueue.getCompletedCount() : 0,
+      dbSubmissionQueue.getFailedCount ? dbSubmissionQueue.getFailedCount() : 0,
     ]);
-    totalWaiting += waiting;
-    totalActive += active;
-    totalCompleted += completed;
-    totalFailed += failed;
   }
+
+  const totalWaiting = codeWaiting + dbWaiting;
+  const totalActive = codeActive + dbActive;
+  const totalCompleted = codeCompleted + dbCompleted;
+  const totalFailed = codeFailed + dbFailed;
 
   return {
     submissions: {
@@ -220,6 +240,22 @@ export async function getQueueStats() {
       processing: totalActive,
       completed: totalCompleted,
       failed: totalFailed,
+    },
+    by_queue: {
+      [SUBMISSIONS_QUEUE]: {
+        total: codeWaiting + codeActive + codeCompleted + codeFailed,
+        in_queue: codeWaiting,
+        processing: codeActive,
+        completed: codeCompleted,
+        failed: codeFailed,
+      },
+      [DB_SUBMISSIONS_QUEUE]: {
+        total: dbWaiting + dbActive + dbCompleted + dbFailed,
+        in_queue: dbWaiting,
+        processing: dbActive,
+        completed: dbCompleted,
+        failed: dbFailed,
+      },
     },
   };
 }
