@@ -112,6 +112,7 @@ async function queryPrometheus(expr) {
 
 async function submitJob(engine) {
   const start = Date.now();
+  const clientIp = `10.0.0.${Math.floor(Math.random() * 500) + 1}`;
   try {
     const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
       method: 'POST',
@@ -119,6 +120,7 @@ async function submitJob(engine) {
         'Content-Type': 'application/json',
         'X-Auth-Token': AUTH_TOKEN,
         'Authorization': `Bearer ${AUTH_TOKEN}`,
+        'X-Forwarded-For': clientIp,
       },
       body: JSON.stringify({
         language_id: engine.id,

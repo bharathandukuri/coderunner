@@ -1,0 +1,94 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mix | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 4 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 60/60 ok | p50: 181ms | p95: 218ms | p99: 219ms\n• Testing 2 RPS for 60s... ✓ PASS | 120/120 ok | p50: 174ms | p95: 207ms | p99: 215ms\n• Testing 3 RPS for 60s... ✗ ABORT | p95 latency (17502ms) exceeded threshold (2500ms); Host load1 (4.53) exceeded 2x vCPUs (4) | p50: 191ms | p95: 17502ms | errors: 0.0%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mix\n  Max Passing RPS:        2\n  p50 at Max RPS:         174 ms\n  p95 at Max RPS:         207 ms\n  p99 at Max RPS:         215 ms\n  First Failure Mode:     p95 latency (17502ms) exceeded threshold (2500ms); Host load1 (4.53) exceeded 2x vCPUs (4)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mix\",\n    \"maxPassingRps\": 2,\n    \"passingStats\": {\n      \"min\": 22,\n      \"p50\": 174,\n      \"p95\": 207,\n      \"p99\": 215,\n      \"max\": 219,\n      \"avg\": 132\n    },\n    \"firstFailureMode\": \"p95 latency (17502ms) exceeded threshold (2500ms); Host load1 (4.53) exceeded 2x vCPUs (4)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 60,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 18,\n          \"p50\": 181,\n          \"p95\": 218,\n          \"p99\": 219,\n          \"max\": 219,\n          \"avg\": 134\n        },\n        \"health\": {\n          \"memAvailPct\": 44.12740246253969,\n          \"load1\": 1.03,\n          \"vCPUs\": 2,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 120,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 22,\n          \"p50\": 174,\n          \"p95\": 207,\n          \"p99\": 215,\n          \"max\": 219,\n          \"avg\": 132\n        },\n        \"health\": {\n          \"memAvailPct\": 43.51161790832761,\n          \"load1\": 0.93,\n          \"vCPUs\": 2,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 3,\n        \"durationSec\": 60,\n        \"total\": 180,\n        \"successes\": 180,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 18,\n          \"p50\": 191,\n          \"p95\": 17502,\n          \"p99\": 18601,\n          \"max\": 18869,\n          \"avg\": 4534\n        },\n        \"health\": {\n          \"memAvailPct\": 58.524471276189296,\n          \"load1\": 4.53,\n          \"vCPUs\": 2,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"p95 latency (17502ms) exceeded threshold (2500ms)\",\n          \"Host load1 (4.53) exceeded 2x vCPUs (4)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mix",
+    "maxPassingRps": 2,
+    "passingStats": {
+      "min": 22,
+      "p50": 174,
+      "p95": 207,
+      "p99": 215,
+      "max": 219,
+      "avg": 132
+    },
+    "firstFailureMode": "p95 latency (17502ms) exceeded threshold (2500ms); Host load1 (4.53) exceeded 2x vCPUs (4)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 60,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 18,
+          "p50": 181,
+          "p95": 218,
+          "p99": 219,
+          "max": 219,
+          "avg": 134
+        },
+        "health": {
+          "memAvailPct": 44.12740246253969,
+          "load1": 1.03,
+          "vCPUs": 2,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 120,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 22,
+          "p50": 174,
+          "p95": 207,
+          "p99": 215,
+          "max": 219,
+          "avg": 132
+        },
+        "health": {
+          "memAvailPct": 43.51161790832761,
+          "load1": 0.93,
+          "vCPUs": 2,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 3,
+        "durationSec": 60,
+        "total": 180,
+        "successes": 180,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 18,
+          "p50": 191,
+          "p95": 17502,
+          "p99": 18601,
+          "max": 18869,
+          "avg": 4534
+        },
+        "health": {
+          "memAvailPct": 58.524471276189296,
+          "load1": 4.53,
+          "vCPUs": 2,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "p95 latency (17502ms) exceeded threshold (2500ms)",
+          "Host load1 (4.53) exceeded 2x vCPUs (4)"
+        ]
+      }
+    ]
+  }
+}

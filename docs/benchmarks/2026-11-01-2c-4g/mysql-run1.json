@@ -1,0 +1,71 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mysql | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 3 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 60/60 ok | p50: 221ms | p95: 484ms | p99: 1116ms\n• Testing 2 RPS for 60s... ✗ ABORT | Error/5xx rate (7.5%) exceeded 5% threshold; p95 latency (25006ms) exceeded threshold (2500ms); Host load1 (7.92) exceeded 2x vCPUs (4) | p50: 17116ms | p95: 25006ms | errors: 7.5%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mysql\n  Max Passing RPS:        1\n  p50 at Max RPS:         221 ms\n  p95 at Max RPS:         484 ms\n  p99 at Max RPS:         1116 ms\n  First Failure Mode:     Error/5xx rate (7.5%) exceeded 5% threshold; p95 latency (25006ms) exceeded threshold (2500ms); Host load1 (7.92) exceeded 2x vCPUs (4)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mysql\",\n    \"maxPassingRps\": 1,\n    \"passingStats\": {\n      \"min\": 190,\n      \"p50\": 221,\n      \"p95\": 484,\n      \"p99\": 1116,\n      \"max\": 1116,\n      \"avg\": 260\n    },\n    \"firstFailureMode\": \"Error/5xx rate (7.5%) exceeded 5% threshold; p95 latency (25006ms) exceeded threshold (2500ms); Host load1 (7.92) exceeded 2x vCPUs (4)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 60,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 190,\n          \"p50\": 221,\n          \"p95\": 484,\n          \"p99\": 1116,\n          \"max\": 1116,\n          \"avg\": 260\n        },\n        \"health\": {\n          \"memAvailPct\": 42.754082203696704,\n          \"load1\": 0.86,\n          \"vCPUs\": 2,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 111,\n        \"failures\": 9,\n        \"errorRate\": 0.075,\n        \"stats\": {\n          \"min\": 215,\n          \"p50\": 17116,\n          \"p95\": 25006,\n          \"p99\": 25010,\n          \"max\": 25011,\n          \"avg\": 13880\n        },\n        \"health\": {\n          \"memAvailPct\": 49.38406581403167,\n          \"load1\": 7.92,\n          \"vCPUs\": 2,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"Error/5xx rate (7.5%) exceeded 5% threshold\",\n          \"p95 latency (25006ms) exceeded threshold (2500ms)\",\n          \"Host load1 (7.92) exceeded 2x vCPUs (4)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mysql",
+    "maxPassingRps": 1,
+    "passingStats": {
+      "min": 190,
+      "p50": 221,
+      "p95": 484,
+      "p99": 1116,
+      "max": 1116,
+      "avg": 260
+    },
+    "firstFailureMode": "Error/5xx rate (7.5%) exceeded 5% threshold; p95 latency (25006ms) exceeded threshold (2500ms); Host load1 (7.92) exceeded 2x vCPUs (4)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 60,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 190,
+          "p50": 221,
+          "p95": 484,
+          "p99": 1116,
+          "max": 1116,
+          "avg": 260
+        },
+        "health": {
+          "memAvailPct": 42.754082203696704,
+          "load1": 0.86,
+          "vCPUs": 2,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 111,
+        "failures": 9,
+        "errorRate": 0.075,
+        "stats": {
+          "min": 215,
+          "p50": 17116,
+          "p95": 25006,
+          "p99": 25010,
+          "max": 25011,
+          "avg": 13880
+        },
+        "health": {
+          "memAvailPct": 49.38406581403167,
+          "load1": 7.92,
+          "vCPUs": 2,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "Error/5xx rate (7.5%) exceeded 5% threshold",
+          "p95 latency (25006ms) exceeded threshold (2500ms)",
+          "Host load1 (7.92) exceeded 2x vCPUs (4)"
+        ]
+      }
+    ]
+  }
+}

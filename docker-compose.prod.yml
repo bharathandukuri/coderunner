@@ -40,6 +40,11 @@ services:
       - RATE_LIMIT_MAX_REQUESTS=${RATE_LIMIT_MAX_REQUESTS:-200}
       - RATE_LIMIT_SUBMISSIONS_MAX=${RATE_LIMIT_SUBMISSIONS_MAX:-120}
       - RATE_LIMIT_SUBMISSIONS_WINDOW_MS=${RATE_LIMIT_SUBMISSIONS_WINDOW_MS:-60000}
+      - MAX_QUEUE_DEPTH=${MAX_QUEUE_DEPTH:-100}
+      - MAX_CONCURRENT_WAIT_REQUESTS=${MAX_CONCURRENT_WAIT_REQUESTS:-100}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+    ports:
+      - "3000:3000"
     depends_on:
       - redis
     restart: unless-stopped
@@ -130,7 +135,9 @@ services:
       - REDIS_URL=redis://redis:6379
       - DOCKER_HOST=tcp://docker-proxy:2375
       - WORKER_TYPE=db
-      - WORKER_CONCURRENCY=${WORKER_DB_CONCURRENCY:-2}
+      - WORKER_CONCURRENCY=${WORKER_DB_CONCURRENCY:-${WORKER_CONCURRENCY:-2}}
+      - POSTGRES_POOL_SIZE=${POSTGRES_POOL_SIZE:-2}
+      - MYSQL_POOL_SIZE=${MYSQL_POOL_SIZE:-2}
       - RESULT_CACHE_TTL=${RESULT_CACHE_TTL:-1800}
       - PORT=3000
     depends_on:
@@ -266,6 +273,8 @@ services:
   prometheus:
     profiles: ["monitoring"]
     image: prom/prometheus:v2.54.1
+    ports:
+      - "9090:9090"
     pids_limit: ${PROMETHEUS_PIDS_LIMIT:-200}
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
