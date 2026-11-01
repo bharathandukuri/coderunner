@@ -131,6 +131,7 @@ W_CONCURRENCY=2
 W_DB_CONCURRENCY=2
 PG_POOL=2
 MY_POOL=2
+MONGO_POOL=0
 MONITORING_ACTIVE=true
 
 if [ -f "$PROJECT_DIR/.env" ]; then
@@ -138,6 +139,7 @@ if [ -f "$PROJECT_DIR/.env" ]; then
   W_DB_CONCURRENCY=$(grep '^WORKER_DB_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
   PG_POOL=$(grep '^POSTGRES_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
   MY_POOL=$(grep '^MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  MONGO_POOL=$(grep '^MONGODB_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 0)
   if grep -q '^ENABLE_MONITORING=false' "$PROJECT_DIR/.env" 2>/dev/null; then
     MONITORING_ACTIVE=false
   fi
@@ -148,12 +150,14 @@ W_CONCURRENCY=${W_CONCURRENCY:-2}
 W_DB_CONCURRENCY=${W_DB_CONCURRENCY:-2}
 PG_POOL=${PG_POOL:-2}
 MY_POOL=${MY_POOL:-2}
+MONGO_POOL=${MONGO_POOL:-0}
 
 # Formula derived in docs/limits.md:
 # Base services: 150MB core (360MB with monitoring)
 # OS reserve: 350MB
 # PostgreSQL: (pool_size + db_concurrency) * 75MB
 # MySQL: (pool_size + db_concurrency) * 280MB
+# MongoDB: (pool_size > 0 ? (pool_size + db_concurrency) * 250MB : 0)
 # Worker Isolate: concurrency * 250MB
 BASE_MEM=360
 if [ "$MONITORING_ACTIVE" = "false" ]; then
@@ -162,8 +166,12 @@ fi
 OS_RESERVE=350
 PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
 MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
+MONGO_MEM=0
+if [ "$MONGO_POOL" -gt 0 ]; then
+  MONGO_MEM=$(( (MONGO_POOL + W_DB_CONCURRENCY) * 250 ))
+fi
 ISO_MEM=$(( W_CONCURRENCY * 250 ))
-MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + ISO_MEM ))
+MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))
 
 # Minimum vCPUs: 1 vCPU for budget concurrency 2, 2 vCPUs for higher concurrency
 MIN_VCPUS_RECOMMENDED=1

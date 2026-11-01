@@ -164,6 +164,7 @@ The table below catalogs every environment variable controlling capacity, concur
 | `MAX_QUEUE_DEPTH`                  | `concurrency * 25`                   | API        | BullMQ queue backlog limit before API returns HTTP 503 backpressure             |
 | `MAX_SOURCE_SIZE`                  | `65536`                              | Sandbox    | Maximum source code string size in bytes (64 KB)                                |
 | `MAX_WALL_TIME_LIMIT`              | `30`                                 | Sandbox    | Upper ceiling for client-requested wall-clock time limit (seconds)              |
+| `MONGODB_POOL_SIZE`                | `2`                                  | Worker     | Target idle warm container depth for MongoDB 8.0 database                       |
 | `MYSQL_POOL_SIZE`                  | `2`                                  | Worker     | Target idle warm container depth for MySQL 8.4 database                         |
 | `NODE_ENV`                         | `development`                        | All        | Node.js environment mode (`production` or `development`)                        |
 | `NODE_EXPORTER_PIDS_LIMIT`         | `50`                                 | Compose    | Process count ceiling for node-exporter container                               |

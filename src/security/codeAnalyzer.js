@@ -114,6 +114,13 @@ const MYSQL_PATTERNS = [
   { pattern: /LOAD\s+DATA/i, reason: 'mysql load data' },
 ];
 
+// ── MongoDB patterns (language ID 10) ───────────────────────────────────────
+const MONGO_PATTERNS = [
+  { pattern: /shutdownServer\s*\(/i, reason: 'mongodb shutdown server' },
+  { pattern: /runCommand\s*\(\s*\{\s*["']?shutdown/i, reason: 'mongodb shutdown command' },
+  { pattern: /fsyncLock\s*\(/i, reason: 'mongodb lock database' },
+];
+
 // ── Map language IDs to their pattern sets ───────────────────────────────────
 const LANGUAGE_PATTERNS = {
   1: C_CPP_PATTERNS,    // C
@@ -125,6 +132,7 @@ const LANGUAGE_PATTERNS = {
   7: SQL_PATTERNS,      // SQL (SQLite 3)
   8: PG_SQL_PATTERNS,   // PostgreSQL 16
   9: MYSQL_PATTERNS,    // MySQL 8.4 LTS
+  10: MONGO_PATTERNS,   // MongoDB 8.0 LTS
 };
 
 /**

@@ -55,6 +55,19 @@ export class WarmContainerPool {
       this.mysqlPoolSize = baseConcurrency;
     }
 
+    const rawMongo = options.mongodbPoolSize !== undefined ? options.mongodbPoolSize : process.env.MONGODB_POOL_SIZE;
+    if (rawMongo !== undefined && rawMongo !== null) {
+      const parsedMongo = Number(rawMongo);
+      if (!Number.isInteger(parsedMongo) || parsedMongo < 1) {
+        throw new Error(`MONGODB_POOL_SIZE must be an integer >= 1, got ${rawMongo}`);
+      }
+      this.mongodbPoolSize = parsedMongo;
+    } else if (options.postgresPoolSize !== undefined && options.mysqlPoolSize !== undefined && options.mongodbPoolSize === undefined && process.env.MONGODB_POOL_SIZE === undefined) {
+      this.mongodbPoolSize = Number(options.postgresPoolSize);
+    } else {
+      this.mongodbPoolSize = baseConcurrency;
+    }
+
     if (options.poolSize !== undefined) {
       const parsed = Number(options.poolSize);
       if (!Number.isInteger(parsed) || parsed < 1) {
@@ -63,6 +76,7 @@ export class WarmContainerPool {
       this.targetPoolSize = parsed;
       if (rawPg === undefined) this.postgresPoolSize = parsed;
       if (rawMy === undefined) this.mysqlPoolSize = parsed;
+      if (rawMongo === undefined) this.mongodbPoolSize = parsed;
     } else {
       this.targetPoolSize = baseConcurrency;
     }
@@ -95,6 +109,7 @@ export class WarmContainerPool {
         targetPoolSize: this.postgresPoolSize,
         image: 'coderunner/postgres:16',
         name: 'postgres',
+        langId: 8,
         isDaemon: true,
         user: '70:70',
         pidsLimit: 64,
@@ -111,11 +126,33 @@ export class WarmContainerPool {
         targetPoolSize: this.mysqlPoolSize,
         image: 'coderunner/mysql:8.4',
         name: 'mysql',
+        langId: 9,
         isDaemon: true,
         user: '999:999',
         pidsLimit: 128,
         memoryLimit: 512 * 1024 * 1024,
         readySignal: 'CODERUNNER_DAEMON_READY',
+      },
+      10: {
+        available: [],
+        waiters: [],
+        activeBoots: 0,
+        consecutiveFailures: 0,
+        circuitState: 'closed',
+        circuitOpenUntil: 0,
+        targetPoolSize: this.mongodbPoolSize,
+        image: 'mongo:8.0',
+        name: 'mongodb',
+        langId: 10,
+        isDaemon: true,
+        pidsLimit: 64,
+        memoryLimit: 512 * 1024 * 1024,
+        readySignal: 'CODERUNNER_DAEMON_READY',
+        cmd: [
+          'bash',
+          '-c',
+          'mkdir -p /box/data && mongod --dbpath /box/data --wiredTigerCacheSizeGB 0.25 --bind_ip 127.0.0.1 --fork --logpath /box/mongo.log && touch /box/.ready && exec sleep infinity',
+        ],
       },
     };
 
@@ -258,6 +295,14 @@ export class WarmContainerPool {
       this.mysqlPoolSize = parsed;
       if (this.pools[9]) this.pools[9].targetPoolSize = this.mysqlPoolSize;
     }
+    if (options.mongodbPoolSize !== undefined) {
+      const parsed = Number(options.mongodbPoolSize);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`MONGODB_POOL_SIZE must be an integer >= 1, got ${options.mongodbPoolSize}`);
+      }
+      this.mongodbPoolSize = parsed;
+      if (this.pools[10]) this.pools[10].targetPoolSize = this.mongodbPoolSize;
+    }
     if (options.poolSize !== undefined) {
       const ps = Number(options.poolSize);
       if (!Number.isInteger(ps) || ps < 1) {
@@ -266,6 +311,7 @@ export class WarmContainerPool {
       this.targetPoolSize = ps;
       if (options.postgresPoolSize === undefined && this.pools[8]) this.pools[8].targetPoolSize = ps;
       if (options.mysqlPoolSize === undefined && this.pools[9]) this.pools[9].targetPoolSize = ps;
+      if (options.mongodbPoolSize === undefined && this.pools[10]) this.pools[10].targetPoolSize = ps;
     }
     if (options.maxWaiters !== undefined) {
       this.maxWaiters = parseInt(options.maxWaiters, 10);
@@ -283,6 +329,8 @@ export class WarmContainerPool {
           this.checkReplenish(8);
         } else if (pool.name === 'mysql') {
           this.checkReplenish(9);
+        } else if (pool.name === 'mongodb') {
+          this.checkReplenish(10);
         }
       }
     }
@@ -619,7 +667,7 @@ export class WarmContainerPool {
     for (const pool of uniquePools) {
       if (!pool.available || pool.available.length === 0) continue;
 
-      const langId = (pool.languages && pool.languages[0]) || (pool.name === 'postgres' ? 8 : (pool.name === 'mysql' ? 9 : null));
+      const langId = pool.langId || (pool.languages && pool.languages[0]) || (pool.name === 'postgres' ? 8 : (pool.name === 'mysql' ? 9 : (pool.name === 'mongodb' ? 10 : null)));
 
       const candidates = [...pool.available];
       for (const container of candidates) {

@@ -81,6 +81,8 @@ export function buildContainerConfig({
   const tmpfs = isDaemon ? {
     '/box': 'rw,exec,nosuid,size=256m,mode=1777',
     '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
+    '/data/db': 'rw,size=16m',
+    '/data/configdb': 'rw,size=16m',
   } : {
     '/box': `rw,exec,nosuid,size=${boxSize}m,mode=1777`,
     '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
@@ -116,6 +118,10 @@ export function buildContainerConfig({
   if (isDaemon) {
     if (pool && pool.user) {
       containerConfig.User = pool.user;
+    }
+    const daemonCmd = (pool && pool.cmd) || lang.cmd;
+    if (daemonCmd) {
+      containerConfig.Cmd = daemonCmd;
     }
   } else {
     containerConfig.Cmd = ['/bin/sh', '-c', 'sleep infinity'];

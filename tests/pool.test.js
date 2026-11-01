@@ -1316,5 +1316,38 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       config.execution.maxBatchSize = savedBatchSize;
     }
   });
+
+  it('32. MongoDB database support: registers language id 10, configures warm pool, and acquires container', async () => {
+    const { getLanguageById } = await import('../src/languages/index.js');
+    const mongoLang = getLanguageById(10);
+
+    assert.ok(mongoLang, 'Language 10 (MongoDB) must be registered');
+    assert.strictEqual(mongoLang.id, 10);
+    assert.strictEqual(mongoLang.category, 'database');
+    assert.strictEqual(mongoLang.is_daemon, true);
+    assert.strictEqual(mongoLang.image, 'mongo:8.0');
+
+    const mockDocker = createMockDocker();
+    const mockRedis = createMockRedis();
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: mockRedis,
+      postgresPoolSize: 1,
+      mysqlPoolSize: 1,
+      mongodbPoolSize: 2,
+    });
+
+    assert.strictEqual(pool.pools[10].targetPoolSize, 2);
+    assert.strictEqual(pool.pools[10].image, 'mongo:8.0');
+    assert.strictEqual(pool.pools[10].isDaemon, true);
+
+    const acquired = await pool.acquire(10);
+    assert.ok(acquired, 'Must acquire MongoDB container');
+    assert.strictEqual(acquired.opts.Image, 'mongo:8.0');
+    assert.deepStrictEqual(acquired.opts.Cmd, pool.pools[10].cmd);
+
+    await pool.release(acquired);
+    await pool.shutdown();
+  });
 });
 
