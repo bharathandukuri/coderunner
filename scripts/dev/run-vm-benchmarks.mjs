@@ -77,7 +77,7 @@ function getVmEnv() {
   const isolateVer = sshCmd('isolate --version | head -n 1');
   const memTotal = sshCmd('free -m | awk \'/Mem:/ {print \\$2}\'');
   const vcpus = sshCmd('nproc');
-  const envVars = sshCmd('cat ~/Codebox/.env | grep -v PASSWORD | grep -v SECRET | grep -v KEY');
+  const envVars = sshCmd('cat ~/coderunner/.env | grep -v PASSWORD | grep -v SECRET | grep -v KEY');
 
   return { kernel, dockerVer, isolateVer, memTotal: `${memTotal} MB`, vcpus, envVars };
 }

@@ -36,7 +36,7 @@ Or execute phases individually:
    - Calculates dynamic memory and vCPU requirements based on configured pool sizes and worker concurrency, comparing against actual host capacity.
    - Verifies sandboxing tooling (Linux Isolate and gVisor `runsc`).
 3. **`build`**:
-   - Compiles application images (`codebox-api`, `codebox-worker`, `codebox-worker-db`).
+   - Compiles application images (`coderunner-api`, `coderunner-worker`, `coderunner-worker-db`).
    - Builds isolated execution images for PostgreSQL 16 and MySQL 8.4 via `scripts/build-images.sh`.
 4. **`up`**:
    - Launches services using Docker Compose. If `ENABLE_MONITORING=true`, includes the `monitoring` profile (Prometheus, Grafana, Alertmanager, exporters).

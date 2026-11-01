@@ -15,9 +15,9 @@ PROXY_URL="${PROXY_HOST/tcp:\/\//http:\/\/}"
 
 # If host default is not reachable, check if running beside docker-proxy in compose
 if [[ "$PROXY_URL" == "http://127.0.0.1:2375" ]] && ! curl -s --connect-timeout 1 "$PROXY_URL/_ping" >/dev/null 2>&1; then
-  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'codebox-worker-db-1'; then
-    echo "[INFO] Running verification inside codebox-worker-db-1 on internal docker-socket-net..."
-    exec docker exec -e DOCKER_HOST=http://docker-proxy:2375 -i codebox-worker-db-1 bash -s < "$0" "$@"
+  if command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' 2>/dev/null | grep -q 'coderunner-worker-db-1'; then
+    echo "[INFO] Running verification inside coderunner-worker-db-1 on internal docker-socket-net..."
+    exec docker exec -e DOCKER_HOST=http://docker-proxy:2375 -i coderunner-worker-db-1 bash -s < "$0" "$@"
   fi
 fi
 
