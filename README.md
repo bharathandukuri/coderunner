@@ -1,240 +1,52 @@
-# CodeRunner
+# CoderRunner
 
-A high-performance, hardened sandboxed code and database execution engine built with Node.js, Express, Docker, and Linux sandboxing (Isolate / cgroups v2).
+CoderRunner is a high-performance, secure code and database execution engine designed for online judges, assessment platforms, and educational sandboxes. It runs untrusted source code and database queries within strict memory, CPU, and network boundaries, leveraging Linux Isolate sandboxes for zero-overhead code execution and pre-warmed Docker containers for instant database transactions.
 
-CodeRunner is designed strictly as a **pure execution engine**—it compiles and executes untrusted code and queries inside hardened sandboxes with strict resource limits (CPU, memory, wall time, PIDs, network disabled), returning clean execution telemetry (`stdout`, `stderr`, duration, peak memory, and exit codes) without forced grading or test-case coupling.
+## Supported Engines
+- **Programming Languages**: C, C++, Java, Python (3.8+), JavaScript (Node.js), TypeScript.
+- **Relational Databases**: PostgreSQL (16), MySQL (8.4), SQLite (3).
 
----
-
-## Key Features
-
-- **Pure Execution Focus**: Decouples code execution from test-case grading. Executes untrusted code and returns raw outputs and process metrics.
-- **Relational Database Execution**:
-  - **PostgreSQL 16 (`id: 8`)** and **MySQL 8.4 LTS (`id: 9`)**: Evaluated via in-memory ephemeral warm pools delivering **~200ms warm hits**.
-  - **Protocol-Level In-Container Runner**: Bypasses CLI shell vulnerabilities (`\!`, `\c`, `system`, `COPY ... PROGRAM`) using direct wire-protocol execution (`pg` and `mysql2`).
-  - **MySQL `DELIMITER` Support**: Built-in client-side statement splitting supporting stored procedures, triggers, and functions (`//`, `$$`).
-  - **Uniform Output Contract**: Consistent tabular formatting, preserving duplicate column names, explicit `NULL` rendering, and strict byte-capped output truncation.
-- **SQLite 3 (`id: 7`)**: Ephemeral file-based database evaluation inside sandbox `tmpfs`.
-- **Standard Programming Languages**:
-  - Single-file (`POST /submissions`) and native multi-file JSON orchestration (`POST /submissions/multi`).
-  - Batch execution for up to 20 submissions per request.
-- **Hardened Sandboxing**:
-  - Drops all Linux capabilities (`CapDrop: ALL`), enforces `no-new-privileges`.
-  - Read-only root filesystem with isolated in-memory `tmpfs` mounts for `/box` and `/tmp`.
-  - Strict resource limits: CPU quotas, memory caps with swap disabled, and PID limits.
-  - Full network isolation (`NetworkDisabled: true`, `NetworkMode: 'none'`).
-  - **Docker Socket Proxy Security Boundary**: Docker socket proxy restricts the worker's API surface (read-only for unneeded endpoints, no volumes/swarm/nodes/secrets); defense-in-depth within the host, not a tenant-isolation boundary. Multi-tenant isolation requires separate host VMs.
-- **Production Architecture**:
-  - Dual BullMQ job queues: `submissions` for isolate code workers, and `submissions-db` for dedicated database workers (`worker-db`).
-  - Dynamic instance heartbeats in Redis with safe orphan sweeping (skips prune if Redis is down).
-  - Out-of-the-box Prometheus metrics (`/metrics`) and alert rules (`alertrules.yml`).
-
----
-
-## System Architecture
+## Architecture
 
 ```
-┌────────────────┐      ┌────────────────┐      ┌─────────────────────────────┐
-│  API Clients   │─────▶│ CodeRunner API │─────▶│    BullMQ / Redis Queues    │
-│  (Frontend/IDE)│      │  (Port 3000)   │      │                             │
-└────────────────┘      └────────────────┘      └──────────────┬──────────────┘
-                                                               │
-                         ┌─────────────────────────────────────┴─────────────────────────────────────┐
-                         │                                                                           │
-                  [submissions]                                                               [submissions-db]
-                         ▼                                                                           ▼
-           ┌───────────────────────────┐                                               ┌───────────────────────────┐
-           │   worker (Code Sandbox)   │                                               │    worker-db (Databases)  │
-           │ (Isolate / cgroups v2 /   │                                               │ (Ephemeral Warm Daemon    │
-           │  Unprivileged Docker)     │                                               │  Pool: Postgres & MySQL)  │
-           └─────────────┬─────────────┘                                               └─────────────┬─────────────┘
-                         ▼                                                                           ▼
-           ┌───────────────────────────┐                                               ┌───────────────────────────┐
-           │  Languages 1–7 Execution  │                                               │  Languages 8–9 Execution  │
-           │  (C, C++, Java, JS, Py)   │                                               │  (Protocol Wire Runner)   │
-           └───────────────────────────┘                                               └───────────────────────────┘
+HTTP Request (POST /submissions?wait=true)
+     │
+     ▼
+┌───────────┐         ┌───────────┐         ┌─────────────────────────┐
+│ Express   │ ──────> │   Redis   │ ──────> │ Worker Process          │
+│ API       │ <────── │  (BullMQ) │         │ (concurrency=N)         │
+└───────────┘ Pub/Sub └───────────┘         └────────────┬────────────┘
+     ▲                                                   │
+     │                                     ┌─────────────┴─────────────┐
+     │                                     ▼                           ▼
+     │                             ┌───────────────┐           ┌───────────────┐
+     │                             │ Linux Isolate │           │ Pre-Warmed    │
+     │                             │ (Native Code) │           │ Docker Pool   │
+     │                             └───────┬───────┘           │ (Postgres/DB) │
+     │                                     │                   └───────┬───────┘
+     └─────────────────────────────────────┴───────────────────────────┘
+                                Execution Result
 ```
 
----
+## Quick Start
 
-## Supported Languages & Engines
-
-| ID | Language / Engine | Version | Execution Mode | Standard Invocation |
-|:---:|---|---|---|---|
-| **1** | C | GCC 9.4.0 | Sandbox Container / Isolate | `gcc -O2 -std=c11 -o main *.c` |
-| **2** | C++ | GCC 9.4.0 | Sandbox Container / Isolate | `g++ -O2 -std=c++17 -o main *.cpp` |
-| **3** | Java | OpenJDK 17 | Sandbox Container / Isolate | `javac -cp . Main.java && java Main` |
-| **4** | JavaScript | Node.js 18.15 | Sandbox Container / Isolate | `node main.js` |
-| **5** | Python | Python 3.8.10 | Sandbox Container / Isolate | `python3 main.py` |
-| **6** | TypeScript | TypeScript 5.0 | Sandbox Container / Isolate | `tsc main.ts && node main.js` |
-| **7** | SQLite 3 | SQLite 3.37 | Sandbox Container / Isolate | `sqlite3 -header -column /box/db.sqlite` |
-| **8** | PostgreSQL | PostgreSQL 16 | Ephemeral Warm Daemon Pool | `/usr/local/bin/runner.js` (Unix socket) |
-| **9** | MySQL | MySQL 8.4 LTS | Ephemeral Warm Daemon Pool | `/usr/local/bin/runner.js` (Unix socket) |
-
----
-
-## Quick Start (Local Development)
-
-### Prerequisites
-- Docker & Docker Compose
-- Node.js 20+
-
-### Setup & Run
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/bharathandukuri/coderunner.git
-   cd coderunner
-   npm install
-   ```
-
-2. **Build runner images**:
-   ```bash
-   ./scripts/build-images.sh
-   ```
-
-3. **Start the stack** (API, Worker, Redis):
-   ```bash
-   docker compose up -d
-   ```
-
-4. **Verify Health**:
-   ```bash
-   curl http://localhost:3000/health
-   ```
-
----
-
-## API Usage Examples
-
-Default development authentication token: `dev-token` (header: `X-Auth-Token: dev-token`).
-
-### 1. Python Code Execution
 ```bash
-curl -X POST "http://localhost:3000/submissions?wait=true" \
+cp .env.example .env
+npm install
+docker compose up -d redis
+npm run worker &
+npm start
+```
+
+Submit code:
+```bash
+curl -X POST http://localhost:3000/submissions?wait=true \
   -H "Content-Type: application/json" \
-  -H "X-Auth-Token: dev-token" \
-  -d '{
-    "language_id": 5,
-    "source_code": "import sys\nprint(f\"Hello, {sys.stdin.read().strip()}!\")",
-    "stdin": "CodeRunner"
-  }'
+  -d '{"language_id": 71, "source_code": "print(sum(range(100)))"}'
 ```
-
-### 2. PostgreSQL 16 Execution
-```bash
-curl -X POST "http://localhost:3000/submissions?wait=true" \
-  -H "Content-Type: application/json" \
-  -H "X-Auth-Token: dev-token" \
-  -d '{
-    "language_id": 8,
-    "source_code": "CREATE TABLE users (id INT, name TEXT);\nINSERT INTO users VALUES (1, '\''Alice'\''), (2, '\''Bob'\'');\nSELECT * FROM users ORDER BY id;"
-  }'
-```
-
-### 3. MySQL 8.4 Execution with Stored Procedure & DELIMITER
-```bash
-curl -X POST "http://localhost:3000/submissions?wait=true" \
-  -H "Content-Type: application/json" \
-  -H "X-Auth-Token: dev-token" \
-  -d '{
-    "language_id": 9,
-    "source_code": "DELIMITER //\nCREATE PROCEDURE Multiply(IN a INT, IN b INT, OUT res INT)\nBEGIN\n  SET res = a * b;\nEND //\nDELIMITER ;\nCALL Multiply(6, 7, @out);\nSELECT @out AS answer;"
-  }'
-```
-
----
-
-## Production Deployment & Operations
-
-For complete production guidelines, update steps, rollbacks, and incident response, see the **[Operations Runbook (docs/ops/RUNBOOK.md)](docs/ops/RUNBOOK.md)**.
-
-### Production Automation Scripts
-
-| Script | Purpose |
-|---|---|
-| [`scripts/preflight.sh`](scripts/preflight.sh) | Verifies Docker, cgroup v2, RAM/disk against capacity formulas, firewall isolation, and Isolate/gVisor. |
-| [`scripts/deploy.sh`](scripts/deploy.sh) | Production lifecycle: `init` (.env token generation), `build` (version tagging), `up` (start & health verification), `status`, `logs`, `rollback`, and `down`. |
-| [`scripts/smoke-test.sh`](scripts/smoke-test.sh) | 13-point automated test suite: health, auth, 5 language executions, TLE, push `wait=true`, multi-file, metrics privacy, Grafana, and Prometheus targets. |
-| [`scripts/leak-check.sh`](scripts/leak-check.sh) | Verifies zero leaked pool containers and zero dangling anonymous Docker volumes. |
-| [`scripts/backup.sh`](scripts/backup.sh) | Backs up `.env`, Grafana, and Prometheus volumes with retention management and one-click restore. |
-
-### Quick Production Launch
-```bash
-# 1. Run host preflight checks
-./scripts/preflight.sh --install-isolate
-
-# 2. Initialize environment with secure randomized credentials
-./scripts/deploy.sh init
-
-# 3. Build container images with git commit tagging
-./scripts/deploy.sh build
-
-# 4. Deploy stack and verify health
-./scripts/deploy.sh up
-
-# 5. Run end-to-end smoke verification
-./scripts/smoke-test.sh
-```
-
----
 
 ## Documentation
 
-- [Operations Runbook & Troubleshooting](docs/ops/RUNBOOK.md)
-- [Runner Output Contract & Specification](docs/output-contract.md)
-- [Capacity Planning & Resource Sizing Guide](docs/capacity.md)
-- [API Endpoints & URL Reference](docs/URLS.md)
-- [Product Requirements & Architecture Details](docs/prd.md)
-
----
-
-## Sandbox & Isolation Architecture
-
-CodeRunner offers two sandboxing execution models depending on the worker type:
-
-### 1. Isolate Sandbox (cgroups v2 + Linux Namespaces)
-Used for standard languages (C, C++, Java, Python, Node, TypeScript, SQLite) via the `submissions` queue in `WORKER_TYPE=isolate` mode.
-- **Where Isolate Lives:**
-  - **In Containerized Production (`docker-compose.prod.yml`)**: Built directly into the `worker` Docker image (`docker/worker/Dockerfile`) using `privileged: true` and `cgroup: host`. The worker manages isolate sandboxes inside `/var/local/lib/isolate`.
-  - **On Host (`scripts/install-isolate.sh`)**: If running workers directly on a Linux bare-metal or VM host (without Docker encapsulation), `install-isolate.sh` installs the `isolate` binary (setuid root) and starts `isolate.service` (cgroup keeper) directly on the host system.
-- **Security:** Each execution runs in a disposable directory sandbox (`/var/local/lib/isolate/<box_id>`) with its own mount namespace, PID namespace, network isolation, and precise cgroups v2 CPU, memory, and wall-time limits.
-
-### 2. Docker & Warm Container Pool Sandbox
-Used for database engines (PostgreSQL 16, MySQL 8.4) via the `submissions-db` queue in `WORKER_TYPE=db` mode, and as a fallback execution mode for languages when Isolate is unavailable:
-- **`docker/worker/Dockerfile`**: The production worker image containing Node.js, the BullMQ worker daemon, and installed compilers/runtimes for all languages.
-- **`docker/images/multi/Dockerfile` (`coderunner/multi:latest`)**: The all-in-one container image containing GCC, JDK, Python, and Node.js. Used for multi-file submissions (`POST /submissions/multi`) or single-container fallback testing when language-specific isolated containers are not pulled.
-- **gVisor Hardening (`runsc`)**: Can be installed on the host via `scripts/install-gvisor.sh`. When active, `DOCKER_RUNTIME=runsc` runs sandboxed containers with user-space kernel emulation.
-- **Docker Socket Proxy**: In production, `worker-db` does not mount `/var/run/docker.sock` directly. It connects over an isolated internal network (`docker-socket-net`) to `tecnativa/docker-socket-proxy`, which filters out dangerous API endpoints (`/volumes`, `/networks`, `/secrets`).
-
----
-
-## Status Codes
-
-| ID | Status Description | Notes |
-|:---:|---|---|
-| **1** | In Queue | Waiting in BullMQ queue |
-| **2** | Processing | Actively executing inside sandbox |
-| **3** | Accepted | Process finished cleanly (exit code 0) |
-| **5** | Time Limit Exceeded | Exceeded CPU or wall time limit (exit code 124) |
-| **6** | Compilation Error | Compilation failed (see `compile_output`) |
-| **7** | Runtime Error (SIGSEGV) | Segmentation fault |
-| **8** | Runtime Error (SIGXFSZ) | File size limit exceeded |
-| **9** | Runtime Error (SIGFPE) | Arithmetic exception / division by zero |
-| **10** | Runtime Error (SIGABRT) | Process aborted |
-| **11** | Runtime Error (NZEC) | Non-zero exit code |
-| **13** | Internal Error | Infrastructure, pool timeout, or circuit breaker trip |
-
----
-
-## Acknowledgements & Credits
-
-CodeRunner was developed by [Bharath Andukuri](https://github.com/bharathandukuri). 
-
-Special thanks and acknowledgement to [Hitesh Choudhary / Chai aur Code](https://github.com/hiteshchoudhary) for early concepts in remote code execution sandboxes that inspired this work.
-
----
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
+- [Local Development Guide](docs/local.md): Local prerequisites, running with Isolate vs Docker, enabling language pools, and running unit tests.
+- [Production Deployment Guide](docs/production.md): Automated server deployment with `scripts/deploy.sh`, Caddy TLS setup, secret rotation, Prometheus/Grafana monitoring, and alert runbooks.
+- [Capacity & Limits Reference](docs/limits.md): Authoritative workload definitions, pass criteria, sizing formulas, VM capacity tiers, overload behavior, and environment variable reference.

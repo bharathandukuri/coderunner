@@ -423,7 +423,7 @@ async function main() {
     console.log(`- ${k}: Warm p50=${v.warm.p50}ms (server p50=${v.warmServer?.p50 ?? 'N/A'}ms) | Cold avg=${v.cold.avg}ms (server avg=${v.coldServer?.avg ?? 'N/A'}ms)`);
   }
 
-  const benchDir = path.join(__dirname, '..', 'docs', 'benchmarks');
+  const benchDir = path.join(__dirname, '..', '..', 'docs', 'benchmarks');
   if (!fs.existsSync(benchDir)) {
     fs.mkdirSync(benchDir, { recursive: true });
   }
