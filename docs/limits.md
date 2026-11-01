@@ -50,6 +50,7 @@ The formulas below are derived directly from empirical `docker stats` measuremen
 | **Host OS Baseline**        | ~350 MiB | ~350 MiB          | Kernel, systemd, journald, SSH, Docker daemon                                                                                    |
 | **PostgreSQL 16 Container** | ~57 MiB  | ~75 MiB           | Single isolated warm PostgreSQL instance                                                                                         |
 | **MySQL 8.4 Container**     | ~243 MiB | ~280 MiB          | Single isolated warm MySQL instance with Performance Schema off                                                                  |
+| **MongoDB 8.0 Container**   | ~90 MiB  | ~97 MiB           | Single isolated warm MongoDB instance with WiredTiger cache 0.25GB                                                               |
 | **Isolate Code Job**        | 0 MiB    | ~15–30 MiB        | Process in Linux namespaces (allocated on demand, released immediately)                                                          |
 | **Docker Code Container**   | ~25 MiB  | ~45–128 MiB       | Cold or pooled language runner container                                                                                         |
 
@@ -65,6 +66,7 @@ Where:
 - $\text{RAM}_{\text{job}} = 30\text{ MiB}$ for Isolate workers, or $128\text{ MiB}$ for Docker code workers.
 - $\text{RAM}_{\text{pool},\text{pg}} = 75\text{ MiB}$ per PostgreSQL container.
 - $\text{RAM}_{\text{pool},\text{my}} = 280\text{ MiB}$ per MySQL container.
+- $\text{RAM}_{\text{pool},\text{mongo}} = 97\text{ MiB}$ per MongoDB container (when `ENABLE_MONGODB=true`).
 
 #### Minimum Required vCPU
 
