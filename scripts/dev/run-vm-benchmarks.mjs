@@ -224,9 +224,9 @@ const WORKLOAD_CONFIGS = {
   },
   '8c-10g': {
     python: { startRps: 15, stepRps: 5, maxRps: 70 },
-    postgres: { startRps: 2, stepRps: 1, maxRps: 8 },
-    mysql: { startRps: 2, stepRps: 1, maxRps: 6 },
-    mix: { startRps: 2, stepRps: 1, maxRps: 8 },
+    postgres: { startRps: 1, stepRps: 1, maxRps: 8 },
+    mysql: { startRps: 1, stepRps: 1, maxRps: 6 },
+    mix: { startRps: 1, stepRps: 1, maxRps: 8 },
   },
 };
 

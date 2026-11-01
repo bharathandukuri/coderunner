@@ -1,0 +1,94 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mysql | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 6 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 60/60 ok | p50: 154ms | p95: 161ms | p99: 190ms\n• Testing 2 RPS for 60s... ✓ PASS | 120/120 ok | p50: 163ms | p95: 179ms | p99: 198ms\n• Testing 3 RPS for 60s... ✗ ABORT | Error/5xx rate (9.4%) exceeded 5% threshold; p95 latency (18700ms) exceeded threshold (2500ms) | p50: 171ms | p95: 18700ms | errors: 9.4%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mysql\n  Max Passing RPS:        2\n  p50 at Max RPS:         163 ms\n  p95 at Max RPS:         179 ms\n  p99 at Max RPS:         198 ms\n  First Failure Mode:     Error/5xx rate (9.4%) exceeded 5% threshold; p95 latency (18700ms) exceeded threshold (2500ms)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mysql\",\n    \"maxPassingRps\": 2,\n    \"passingStats\": {\n      \"min\": 148,\n      \"p50\": 163,\n      \"p95\": 179,\n      \"p99\": 198,\n      \"max\": 205,\n      \"avg\": 164\n    },\n    \"firstFailureMode\": \"Error/5xx rate (9.4%) exceeded 5% threshold; p95 latency (18700ms) exceeded threshold (2500ms)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 60,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 145,\n          \"p50\": 154,\n          \"p95\": 161,\n          \"p99\": 190,\n          \"max\": 190,\n          \"avg\": 155\n        },\n        \"health\": {\n          \"memAvailPct\": 57.00919306697716,\n          \"load1\": 0.66,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 120,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 148,\n          \"p50\": 163,\n          \"p95\": 179,\n          \"p99\": 198,\n          \"max\": 205,\n          \"avg\": 164\n        },\n        \"health\": {\n          \"memAvailPct\": 57.374841590280376,\n          \"load1\": 3.65,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 3,\n        \"durationSec\": 60,\n        \"total\": 181,\n        \"successes\": 164,\n        \"failures\": 17,\n        \"errorRate\": 0.09392265193370165,\n        \"stats\": {\n          \"min\": 141,\n          \"p50\": 171,\n          \"p95\": 18700,\n          \"p99\": 19346,\n          \"max\": 19346,\n          \"avg\": 4534\n        },\n        \"health\": {\n          \"memAvailPct\": 79.6142305942692,\n          \"load1\": 5.06,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"Error/5xx rate (9.4%) exceeded 5% threshold\",\n          \"p95 latency (18700ms) exceeded threshold (2500ms)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mysql",
+    "maxPassingRps": 2,
+    "passingStats": {
+      "min": 148,
+      "p50": 163,
+      "p95": 179,
+      "p99": 198,
+      "max": 205,
+      "avg": 164
+    },
+    "firstFailureMode": "Error/5xx rate (9.4%) exceeded 5% threshold; p95 latency (18700ms) exceeded threshold (2500ms)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 60,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 145,
+          "p50": 154,
+          "p95": 161,
+          "p99": 190,
+          "max": 190,
+          "avg": 155
+        },
+        "health": {
+          "memAvailPct": 57.00919306697716,
+          "load1": 0.66,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 120,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 148,
+          "p50": 163,
+          "p95": 179,
+          "p99": 198,
+          "max": 205,
+          "avg": 164
+        },
+        "health": {
+          "memAvailPct": 57.374841590280376,
+          "load1": 3.65,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 3,
+        "durationSec": 60,
+        "total": 181,
+        "successes": 164,
+        "failures": 17,
+        "errorRate": 0.09392265193370165,
+        "stats": {
+          "min": 141,
+          "p50": 171,
+          "p95": 18700,
+          "p99": 19346,
+          "max": 19346,
+          "avg": 4534
+        },
+        "health": {
+          "memAvailPct": 79.6142305942692,
+          "load1": 5.06,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "Error/5xx rate (9.4%) exceeded 5% threshold",
+          "p95 latency (18700ms) exceeded threshold (2500ms)"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "workload": "mysql",
+  "overloadRps": 4,
+  "durationSec": 60,
+  "totalDispatched": 224,
+  "statusCounts": {
+    "201": 182,
+    "err": 42
+  },
+  "sshAlive": true,
+  "runningContainers": 25
+}

@@ -1,0 +1,70 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mix | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 8 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 60/60 ok | p50: 172ms | p95: 196ms | p99: 209ms\n• Testing 2 RPS for 60s... ✗ ABORT | Error/5xx rate (5.8%) exceeded 5% threshold; p95 latency (20912ms) exceeded threshold (2500ms) | p50: 186ms | p95: 20912ms | errors: 5.8%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mix\n  Max Passing RPS:        1\n  p50 at Max RPS:         172 ms\n  p95 at Max RPS:         196 ms\n  p99 at Max RPS:         209 ms\n  First Failure Mode:     Error/5xx rate (5.8%) exceeded 5% threshold; p95 latency (20912ms) exceeded threshold (2500ms)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mix\",\n    \"maxPassingRps\": 1,\n    \"passingStats\": {\n      \"min\": 20,\n      \"p50\": 172,\n      \"p95\": 196,\n      \"p99\": 209,\n      \"max\": 209,\n      \"avg\": 127\n    },\n    \"firstFailureMode\": \"Error/5xx rate (5.8%) exceeded 5% threshold; p95 latency (20912ms) exceeded threshold (2500ms)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 60,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 20,\n          \"p50\": 172,\n          \"p95\": 196,\n          \"p99\": 209,\n          \"max\": 209,\n          \"avg\": 127\n        },\n        \"health\": {\n          \"memAvailPct\": 56.491361219729306,\n          \"load1\": 2.07,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 113,\n        \"failures\": 7,\n        \"errorRate\": 0.058333333333333334,\n        \"stats\": {\n          \"min\": 18,\n          \"p50\": 186,\n          \"p95\": 20912,\n          \"p99\": 21756,\n          \"max\": 22075,\n          \"avg\": 6575\n        },\n        \"health\": {\n          \"memAvailPct\": 82.41249458873183,\n          \"load1\": 5.58,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"Error/5xx rate (5.8%) exceeded 5% threshold\",\n          \"p95 latency (20912ms) exceeded threshold (2500ms)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mix",
+    "maxPassingRps": 1,
+    "passingStats": {
+      "min": 20,
+      "p50": 172,
+      "p95": 196,
+      "p99": 209,
+      "max": 209,
+      "avg": 127
+    },
+    "firstFailureMode": "Error/5xx rate (5.8%) exceeded 5% threshold; p95 latency (20912ms) exceeded threshold (2500ms)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 60,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 20,
+          "p50": 172,
+          "p95": 196,
+          "p99": 209,
+          "max": 209,
+          "avg": 127
+        },
+        "health": {
+          "memAvailPct": 56.491361219729306,
+          "load1": 2.07,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 113,
+        "failures": 7,
+        "errorRate": 0.058333333333333334,
+        "stats": {
+          "min": 18,
+          "p50": 186,
+          "p95": 20912,
+          "p99": 21756,
+          "max": 22075,
+          "avg": 6575
+        },
+        "health": {
+          "memAvailPct": 82.41249458873183,
+          "load1": 5.58,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "Error/5xx rate (5.8%) exceeded 5% threshold",
+          "p95 latency (20912ms) exceeded threshold (2500ms)"
+        ]
+      }
+    ]
+  }
+}

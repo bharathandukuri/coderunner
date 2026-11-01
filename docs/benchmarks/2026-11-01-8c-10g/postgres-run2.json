@@ -1,0 +1,69 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: postgres | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 8 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 60/60 ok | p50: 166ms | p95: 173ms | p99: 191ms\n• Testing 2 RPS for 60s... ✗ ABORT | p95 latency (10005ms) exceeded threshold (2500ms) | p50: 171ms | p95: 10005ms | errors: 4.2%\n\n=================================================\n  RAMP Test Complete\n  Workload:               postgres\n  Max Passing RPS:        1\n  p50 at Max RPS:         166 ms\n  p95 at Max RPS:         173 ms\n  p99 at Max RPS:         191 ms\n  First Failure Mode:     p95 latency (10005ms) exceeded threshold (2500ms)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"postgres\",\n    \"maxPassingRps\": 1,\n    \"passingStats\": {\n      \"min\": 158,\n      \"p50\": 166,\n      \"p95\": 173,\n      \"p99\": 191,\n      \"max\": 191,\n      \"avg\": 166\n    },\n    \"firstFailureMode\": \"p95 latency (10005ms) exceeded threshold (2500ms)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 60,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 158,\n          \"p50\": 166,\n          \"p95\": 173,\n          \"p99\": 191,\n          \"max\": 191,\n          \"avg\": 166\n        },\n        \"health\": {\n          \"memAvailPct\": 58.15272857550281,\n          \"load1\": 1.63,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 115,\n        \"failures\": 5,\n        \"errorRate\": 0.041666666666666664,\n        \"stats\": {\n          \"min\": 150,\n          \"p50\": 171,\n          \"p95\": 10005,\n          \"p99\": 10019,\n          \"max\": 10095,\n          \"avg\": 2670\n        },\n        \"health\": {\n          \"memAvailPct\": 57.62743291009556,\n          \"load1\": 2.85,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"p95 latency (10005ms) exceeded threshold (2500ms)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "postgres",
+    "maxPassingRps": 1,
+    "passingStats": {
+      "min": 158,
+      "p50": 166,
+      "p95": 173,
+      "p99": 191,
+      "max": 191,
+      "avg": 166
+    },
+    "firstFailureMode": "p95 latency (10005ms) exceeded threshold (2500ms)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 60,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 158,
+          "p50": 166,
+          "p95": 173,
+          "p99": 191,
+          "max": 191,
+          "avg": 166
+        },
+        "health": {
+          "memAvailPct": 58.15272857550281,
+          "load1": 1.63,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 115,
+        "failures": 5,
+        "errorRate": 0.041666666666666664,
+        "stats": {
+          "min": 150,
+          "p50": 171,
+          "p95": 10005,
+          "p99": 10019,
+          "max": 10095,
+          "avg": 2670
+        },
+        "health": {
+          "memAvailPct": 57.62743291009556,
+          "load1": 2.85,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "p95 latency (10005ms) exceeded threshold (2500ms)"
+        ]
+      }
+    ]
+  }
+}

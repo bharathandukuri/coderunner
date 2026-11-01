@@ -1,0 +1,11 @@
+{
+  "workload": "postgres",
+  "overloadRps": 4,
+  "durationSec": 60,
+  "totalDispatched": 241,
+  "statusCounts": {
+    "201": 241
+  },
+  "sshAlive": true,
+  "runningContainers": 30
+}

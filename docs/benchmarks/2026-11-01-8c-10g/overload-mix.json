@@ -1,0 +1,11 @@
+{
+  "workload": "mix",
+  "overloadRps": 2,
+  "durationSec": 60,
+  "totalDispatched": 120,
+  "statusCounts": {
+    "201": 120
+  },
+  "sshAlive": true,
+  "runningContainers": 13
+}

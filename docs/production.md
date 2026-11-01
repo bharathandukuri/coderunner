@@ -25,6 +25,7 @@ Or execute phases individually:
 ```
 
 ### Deployment Phases
+
 1. **`init`**:
    - Creates required host mount directories (`certs/`, `data/`, `caddy_data/`, `caddy_config/`).
    - Generates `.env` from `.env.example` if no `.env` exists.
@@ -43,6 +44,7 @@ Or execute phases individually:
    - Automatically executes `scripts/verify-docker-proxy.sh` to confirm the Docker socket proxy blocks privileged operations.
 
 To inspect deployment status or tear down:
+
 ```bash
 ./scripts/deploy.sh status
 ./scripts/deploy.sh down
@@ -54,11 +56,11 @@ To inspect deployment status or tear down:
 
 The following variables in `.env` contain sensitive secrets and must be configured with secure random values before launching in production:
 
-| Variable | Description | Security Requirement |
-|---|---|---|
-| `AUTH_TOKEN` | Space-separated list of authorized API bearer tokens | Generate high-entropy strings (e.g. `openssl rand -hex 32`). Reject default `test-token`. |
-| `GRAFANA_PASSWORD` | Admin password for the Grafana dashboard | Use strong credential. Do not leave as default `admin`. |
-| `ALERT_WEBHOOK_URL` | Webhook URL for Alertmanager incident notifications | Keep private; do not commit webhook tokens or Slack/PagerDuty URLs to git. |
+| Variable            | Description                                          | Security Requirement                                                                      |
+| ------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `AUTH_TOKEN`        | Space-separated list of authorized API bearer tokens | Generate high-entropy strings (e.g. `openssl rand -hex 32`). Reject default `test-token`. |
+| `GRAFANA_PASSWORD`  | Admin password for the Grafana dashboard             | Use strong credential. Do not leave as default `admin`.                                   |
+| `ALERT_WEBHOOK_URL` | Webhook URL for Alertmanager incident notifications  | Keep private; do not commit webhook tokens or Slack/PagerDuty URLs to git.                |
 
 All credentials must be stored solely in `.env` (which is excluded via `.gitignore`). Back up `.env` securely before upgrades.
 
@@ -69,12 +71,15 @@ All credentials must be stored solely in `.env` (which is excluded via `.gitigno
 CoderRunner uses [Caddy](https://caddyserver.com/) as the edge reverse proxy. Caddy handles automatic HTTPS certificate provisioning via Let's Encrypt / ZeroSSL, terminates TLS, and enforces rate limiting.
 
 ### Domain Configuration
+
 In `.env`:
+
 ```bash
 DOMAIN=judge.example.com
 ```
 
 ### Ingress Rules
+
 - Port `80`: Automatically redirects all HTTP traffic to HTTPS (port `443`).
 - Port `443`: Public API endpoints (`/submissions`, `/batch`, `/multi`, `/health`, `/metrics`).
 - Internal services (Redis, Docker socket proxy, Prometheus, Grafana, Alertmanager) are **never** exposed to the public internet. They bind exclusively to the private Docker bridge network.
@@ -91,6 +96,7 @@ ssh -N -L 9090:127.0.0.1:9090 -L 3001:127.0.0.1:3001 user@your-server-ip
 ```
 
 Then open in your local browser:
+
 - **Grafana**: [http://localhost:3001](http://localhost:3001) (User: `admin`, Password: `${GRAFANA_PASSWORD}`)
 - **Prometheus**: [http://localhost:9090](http://localhost:9090)
 
@@ -100,22 +106,22 @@ Then open in your local browser:
 
 Alerts are monitored continuously by Prometheus and dispatched via Alertmanager (`alertrules.yml`). When an alert triggers, execute the corresponding runbook action:
 
-| Alert Name | Severity | Condition | Operator Runbook Command / Mitigation |
-|---|---|---|---|
-| `DatabasePoolDepthDepleted` | Warning | `coderunner_pool_depth == 0` for 1m | Warm pool is starved. Check worker logs: `docker compose logs -f worker-db`. If boots are hanging, restart the database worker: `docker compose restart worker-db`. |
-| `DatabasePoolWaitersHigh` | Warning | `coderunner_pool_waiters > 5` for 1m | Query queue is backlogged. Check if long-running queries are saturating concurrency. If host memory permits, increase `POSTGRES_POOL_SIZE` or `MYSQL_POOL_SIZE` in `.env` and run `./scripts/deploy.sh up`. |
-| `DatabasePoolBootSlow` | Warning | p95 boot duration > 3s for 2m | High host I/O or CPU pressure during container creation. Inspect host load via `uptime` and `iostat -xz 1`. Check disk space. |
-| `DatabasePoolBootFailuresSpike` | Critical | Boot failure rate > 0.1/s for 1m | Docker daemon cannot boot containers. Check Docker daemon logs (`journalctl -u docker -n 100`) and test manual container run: `docker run --rm alpine echo ok`. |
-| `DatabasePoolAcquireWaitHigh` | Warning | p95 acquire wait > 2s for 2m | Pool capacity is insufficient for current query arrival rate. Increase pool depth or enable API backpressure by tuning `MAX_QUEUE_DEPTH`. |
-| `DatabasePoolCircuitBreakerTripped`| Critical| Circuit breaker tripped (> 0) for 30s | 3 consecutive container boot failures occurred. Worker has temporarily paused container replenishment. Inspect root cause in `docker compose logs worker-db`, verify Docker socket proxy, and restart: `docker compose restart worker-db`. |
-| `LeakedPoolContainers` | Warning | Untracked containers > 0 or total containers > 25 | Orphaned containers detected. Run `./scripts/leak-check.sh` to view orphans. Clean them up with `docker container prune` or restart worker-db which executes `startupSweep()`. |
-| `TargetDown` | Critical | Scrape target unreachable for 2m | A core service or exporter crashed. Check service status: `docker compose ps`. Restart failing container: `docker compose restart <service>`. |
-| `QueueBacklogGrowing` | Warning | Submissions in BullMQ queue > 10 for 2m | Worker throughput is lower than ingestion rate. Verify workers are consuming jobs: `docker compose logs worker worker-db`. Scale `WORKER_CONCURRENCY` if CPU headroom exists. |
-| `InternalErrorRateHigh` | Critical | Status 13 rate > 5% over 5m | Workers are encountering fatal system errors (permissions, runner crashes). Check logs: `docker compose logs --tail=100 worker`. Verify `/tmp` permissions and disk space. |
-| `HighTLERatio` | Warning | Status 5 (TLE) > 20% over 2m | High volume of runaway user code or slow queries. Inspect if submissions are spamming infinite loops. Adjust `DEFAULT_WALL_TIME_LIMIT` or client rate limits. |
-| `HostMemoryHigh` | Warning | Host MemAvailable < 15% for 2m | Host is nearing out-of-memory. Stop non-essential profiles (`ENABLE_MONITORING=false ./scripts/deploy.sh up`), reduce `WORKER_CONCURRENCY`, or upgrade host RAM. |
-| `RootDiskHigh` | Warning | Host root disk usage > 80% for 2m | Disk partition filling up. Prune dangling Docker images and builder cache: `docker image prune -f && docker builder prune -f`. Rotate old logs in `/var/log`. |
-| `RedisDown` | Critical | Redis unreachable for 1m | Redis container crashed or port unresponsive. Check `docker compose logs redis`. Start or restart Redis: `docker compose up -d redis`. |
+| Alert Name                          | Severity | Condition                                         | Operator Runbook Command / Mitigation                                                                                                                                                                                                      |
+| ----------------------------------- | -------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DatabasePoolDepthDepleted`         | Warning  | `coderunner_pool_depth == 0` for 1m               | Warm pool is starved. Check worker logs: `docker compose logs -f worker-db`. If boots are hanging, restart the database worker: `docker compose restart worker-db`.                                                                        |
+| `DatabasePoolWaitersHigh`           | Warning  | `coderunner_pool_waiters > 5` for 1m              | Query queue is backlogged. Check if long-running queries are saturating concurrency. If host memory permits, increase `POSTGRES_POOL_SIZE` or `MYSQL_POOL_SIZE` in `.env` and run `./scripts/deploy.sh up`.                                |
+| `DatabasePoolBootSlow`              | Warning  | p95 boot duration > 3s for 2m                     | High host I/O or CPU pressure during container creation. Inspect host load via `uptime` and `iostat -xz 1`. Check disk space.                                                                                                              |
+| `DatabasePoolBootFailuresSpike`     | Critical | Boot failure rate > 0.1/s for 1m                  | Docker daemon cannot boot containers. Check Docker daemon logs (`journalctl -u docker -n 100`) and test manual container run: `docker run --rm alpine echo ok`.                                                                            |
+| `DatabasePoolAcquireWaitHigh`       | Warning  | p95 acquire wait > 2s for 2m                      | Pool capacity is insufficient for current query arrival rate. Increase pool depth or enable API backpressure by tuning `MAX_QUEUE_DEPTH`.                                                                                                  |
+| `DatabasePoolCircuitBreakerTripped` | Critical | Circuit breaker tripped (> 0) for 30s             | 3 consecutive container boot failures occurred. Worker has temporarily paused container replenishment. Inspect root cause in `docker compose logs worker-db`, verify Docker socket proxy, and restart: `docker compose restart worker-db`. |
+| `LeakedPoolContainers`              | Warning  | Untracked containers > 0 or total containers > 25 | Orphaned containers detected. Run `./scripts/leak-check.sh` to view orphans. Clean them up with `docker container prune` or restart worker-db which executes `startupSweep()`.                                                             |
+| `TargetDown`                        | Critical | Scrape target unreachable for 2m                  | A core service or exporter crashed. Check service status: `docker compose ps`. Restart failing container: `docker compose restart <service>`.                                                                                              |
+| `QueueBacklogGrowing`               | Warning  | Submissions in BullMQ queue > 10 for 2m           | Worker throughput is lower than ingestion rate. Verify workers are consuming jobs: `docker compose logs worker worker-db`. Scale `WORKER_CONCURRENCY` if CPU headroom exists.                                                              |
+| `InternalErrorRateHigh`             | Critical | Status 13 rate > 5% over 5m                       | Workers are encountering fatal system errors (permissions, runner crashes). Check logs: `docker compose logs --tail=100 worker`. Verify `/tmp` permissions and disk space.                                                                 |
+| `HighTLERatio`                      | Warning  | Status 5 (TLE) > 20% over 2m                      | High volume of runaway user code or slow queries. Inspect if submissions are spamming infinite loops. Adjust `DEFAULT_WALL_TIME_LIMIT` or client rate limits.                                                                              |
+| `HostMemoryHigh`                    | Warning  | Host MemAvailable < 15% for 2m                    | Host is nearing out-of-memory. Stop non-essential profiles (`ENABLE_MONITORING=false ./scripts/deploy.sh up`), reduce `WORKER_CONCURRENCY`, or upgrade host RAM.                                                                           |
+| `RootDiskHigh`                      | Warning  | Host root disk usage > 80% for 2m                 | Disk partition filling up. Prune dangling Docker images and builder cache: `docker image prune -f && docker builder prune -f`. Rotate old logs in `/var/log`.                                                                              |
+| `RedisDown`                         | Critical | Redis unreachable for 1m                          | Redis container crashed or port unresponsive. Check `docker compose logs redis`. Start or restart Redis: `docker compose up -d redis`.                                                                                                     |
 
 ---
 
@@ -171,39 +177,53 @@ CoderRunner implements a defense-in-depth security model across five layers:
 ## 7. Operational Procedures
 
 ### Health Verification
+
 Run the 13-stage end-to-end smoke test suite:
+
 ```bash
 ./scripts/smoke-test.sh
 ```
 
 ### Resource Leak Detection
+
 Verify that no dangling Docker volumes, orphaned containers, or stale network mounts remain:
+
 ```bash
 ./scripts/leak-check.sh
 ```
+
 To run leak checks while the warm pool is active:
+
 ```bash
 ./scripts/leak-check.sh --allow-warm-pool
 ```
 
 ### Backups
+
 Create a backup archive of `.env` configuration and persistent monitoring volumes:
+
 ```bash
 ./scripts/backup.sh backup
 ```
+
 List existing backups:
+
 ```bash
 ./scripts/backup.sh list
 ```
 
 ### Restoring from Backup
+
 Restore `.env` and monitoring volumes from an archive:
+
 ```bash
 ./scripts/backup.sh restore ./backups/coderunner-backup-YYYY-MM-DDTHH-MM-SS.tar.gz
 ```
 
 ### Rollback Procedure
+
 If a deployment fails:
+
 1. Revert code to the previous Git commit:
    ```bash
    git checkout <previous-commit-hash>

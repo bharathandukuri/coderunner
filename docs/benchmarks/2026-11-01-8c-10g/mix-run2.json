@@ -1,0 +1,38 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mix | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 8 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✗ ABORT | p95 latency (20094ms) exceeded threshold (2500ms) | p50: 197ms | p95: 20094ms | errors: 5.0%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mix\n  Max Passing RPS:        0 (failed at initial RPS)\n  First Failure Mode:     p95 latency (20094ms) exceeded threshold (2500ms)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mix\",\n    \"maxPassingRps\": 0,\n    \"passingStats\": null,\n    \"firstFailureMode\": \"p95 latency (20094ms) exceeded threshold (2500ms)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 57,\n        \"failures\": 3,\n        \"errorRate\": 0.05,\n        \"stats\": {\n          \"min\": 21,\n          \"p50\": 197,\n          \"p95\": 20094,\n          \"p99\": 25006,\n          \"max\": 25006,\n          \"avg\": 2530\n        },\n        \"health\": {\n          \"memAvailPct\": 85.9986235147984,\n          \"load1\": 5.04,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"p95 latency (20094ms) exceeded threshold (2500ms)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mix",
+    "maxPassingRps": 0,
+    "passingStats": null,
+    "firstFailureMode": "p95 latency (20094ms) exceeded threshold (2500ms)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 57,
+        "failures": 3,
+        "errorRate": 0.05,
+        "stats": {
+          "min": 21,
+          "p50": 197,
+          "p95": 20094,
+          "p99": 25006,
+          "max": 25006,
+          "avg": 2530
+        },
+        "health": {
+          "memAvailPct": 85.9986235147984,
+          "load1": 5.04,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "p95 latency (20094ms) exceeded threshold (2500ms)"
+        ]
+      }
+    ]
+  }
+}

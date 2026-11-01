@@ -1,0 +1,12 @@
+{
+  "workload": "python",
+  "overloadRps": 140,
+  "durationSec": 60,
+  "totalDispatched": 8401,
+  "statusCounts": {
+    "201": 8295,
+    "503": 106
+  },
+  "sshAlive": true,
+  "runningContainers": 32
+}

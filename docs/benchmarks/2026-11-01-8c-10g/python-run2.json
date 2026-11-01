@@ -1,0 +1,69 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: python | Base URL: http://127.0.0.1:3000\n  RPS Range: 15 -> 70 (step: 5, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 1000ms, error rate > 5%\n=================================================\n\n• Testing 15 RPS for 60s... ✓ PASS | 891/900 ok | p50: 34ms | p95: 531ms | p99: 1161ms\n• Testing 20 RPS for 60s... ✗ ABORT | Error/5xx rate (9.9%) exceeded 5% threshold | p50: 20ms | p95: 22ms | errors: 9.9%\n\n=================================================\n  RAMP Test Complete\n  Workload:               python\n  Max Passing RPS:        15\n  p50 at Max RPS:         34 ms\n  p95 at Max RPS:         531 ms\n  p99 at Max RPS:         1161 ms\n  First Failure Mode:     Error/5xx rate (9.9%) exceeded 5% threshold\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"python\",\n    \"maxPassingRps\": 15,\n    \"passingStats\": {\n      \"min\": 2,\n      \"p50\": 34,\n      \"p95\": 531,\n      \"p99\": 1161,\n      \"max\": 1283,\n      \"avg\": 107\n    },\n    \"firstFailureMode\": \"Error/5xx rate (9.9%) exceeded 5% threshold\",\n    \"steps\": [\n      {\n        \"rps\": 15,\n        \"durationSec\": 60,\n        \"total\": 900,\n        \"successes\": 891,\n        \"failures\": 9,\n        \"errorRate\": 0.01,\n        \"stats\": {\n          \"min\": 2,\n          \"p50\": 34,\n          \"p95\": 531,\n          \"p99\": 1161,\n          \"max\": 1283,\n          \"avg\": 107\n        },\n        \"health\": {\n          \"memAvailPct\": 54.58211653455709,\n          \"load1\": 4.19,\n          \"vCPUs\": 8,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 20,\n        \"durationSec\": 60,\n        \"total\": 1200,\n        \"successes\": 1081,\n        \"failures\": 119,\n        \"errorRate\": 0.09916666666666667,\n        \"stats\": {\n          \"min\": 0,\n          \"p50\": 20,\n          \"p95\": 22,\n          \"p99\": 101,\n          \"max\": 180,\n          \"avg\": 20\n        },\n        \"health\": {\n          \"memAvailPct\": null,\n          \"load1\": null,\n          \"vCPUs\": null,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"Error/5xx rate (9.9%) exceeded 5% threshold\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "python",
+    "maxPassingRps": 15,
+    "passingStats": {
+      "min": 2,
+      "p50": 34,
+      "p95": 531,
+      "p99": 1161,
+      "max": 1283,
+      "avg": 107
+    },
+    "firstFailureMode": "Error/5xx rate (9.9%) exceeded 5% threshold",
+    "steps": [
+      {
+        "rps": 15,
+        "durationSec": 60,
+        "total": 900,
+        "successes": 891,
+        "failures": 9,
+        "errorRate": 0.01,
+        "stats": {
+          "min": 2,
+          "p50": 34,
+          "p95": 531,
+          "p99": 1161,
+          "max": 1283,
+          "avg": 107
+        },
+        "health": {
+          "memAvailPct": 54.58211653455709,
+          "load1": 4.19,
+          "vCPUs": 8,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 20,
+        "durationSec": 60,
+        "total": 1200,
+        "successes": 1081,
+        "failures": 119,
+        "errorRate": 0.09916666666666667,
+        "stats": {
+          "min": 0,
+          "p50": 20,
+          "p95": 22,
+          "p99": 101,
+          "max": 180,
+          "avg": 20
+        },
+        "health": {
+          "memAvailPct": null,
+          "load1": null,
+          "vCPUs": null,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "Error/5xx rate (9.9%) exceeded 5% threshold"
+        ]
+      }
+    ]
+  }
+}
