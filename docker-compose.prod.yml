@@ -253,7 +253,7 @@ services:
       - /bin/sh
       - -c
       - |
-        sed "s|ALERT_WEBHOOK_URL_PLACEHOLDER|$${ALERT_WEBHOOK_URL:-http://localhost:9099/webhook}|g" /etc/alertmanager/alertmanager.template.yml > /tmp/alertmanager.yml
+        sed "s|ALERT_WEBHOOK_URL_PLACEHOLDER|$${ALERT_WEBHOOK_URL}|g" /etc/alertmanager/alertmanager.template.yml > /tmp/alertmanager.yml
         exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
     volumes:
       - ./alertmanager.template.yml:/etc/alertmanager/alertmanager.template.yml:ro

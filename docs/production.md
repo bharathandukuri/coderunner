@@ -60,9 +60,31 @@ The following variables in `.env` contain sensitive secrets and must be configur
 | ------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | `AUTH_TOKEN`        | Space-separated list of authorized API bearer tokens | Generate high-entropy strings (e.g. `openssl rand -hex 32`). Reject default `test-token`. |
 | `GRAFANA_PASSWORD`  | Admin password for the Grafana dashboard             | Use strong credential. Do not leave as default `admin`.                                   |
-| `ALERT_WEBHOOK_URL` | Webhook URL for Alertmanager incident notifications  | Keep private; do not commit webhook tokens or Slack/PagerDuty URLs to git.                |
+| `ALERT_WEBHOOK_URL` | Webhook URL for Alertmanager incident notifications  | Valid Discord webhook URL. Required unless `--no-alerts` is passed to `deploy.sh`.        |
 
 All credentials must be stored solely in `.env` (which is excluded via `.gitignore`). Back up `.env` securely before upgrades.
+
+### Setting Up Discord Alert Delivery
+
+Alertmanager v0.27 sends incident notifications directly to Discord using native `discord_configs`:
+
+1. In Discord, open your server and navigate to **Server Settings** → **Integrations** → **Webhooks**.
+2. Click **New Webhook**.
+3. Choose your designated operational channel (e.g. `#ops-alerts`), assign a name (e.g. `CodeRunner Alerts`), and click **Copy Webhook URL**.
+4. On your server, place this URL in `.env`:
+   ```bash
+   ALERT_WEBHOOK_URL=https://discord.com/api/webhooks/123456789/abcdef...
+   ```
+5. Deploy or reload the production stack:
+   ```bash
+   ./scripts/deploy.sh up
+   ```
+   *(If deploying temporarily without alerts, pass `./scripts/deploy.sh up --no-alerts`)*.
+6. Verify alert delivery:
+   ```bash
+   ./scripts/deploy.sh alert-test
+   ```
+   This executes `amtool alert add TestAlert severity=test` inside the Alertmanager container and outputs `check your Discord channel now`. You should immediately see the alert in your Discord channel.
 
 ---
 

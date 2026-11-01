@@ -37,7 +37,8 @@ Usage: scripts/deploy.sh <command> [options]
 Commands:
   init            Initialize or back up .env with generated secure tokens (never overwrites existing values)
   build           Build all application and database images tagged with git SHA (preserves rollback tag)
-  up              Validate config, start services, and verify health
+  up [--no-alerts] Validate config, start services, and verify health
+  alert-test      Send a test alert to verify Discord delivery via Alertmanager
   status          Show running containers, health status, and resource usage
   logs [service]  Follow logs for all or a specific service
   rollback        Revert API and Worker images to the previous tag and restart
@@ -143,6 +144,13 @@ cmd_build() {
 }
 
 cmd_up() {
+  local no_alerts=false
+  for arg in "$@"; do
+    if [ "$arg" = "--no-alerts" ]; then
+      no_alerts=true
+    fi
+  done
+
   echo "=== Starting CodeRunner Production Services ==="
   cd "$PROJECT_DIR"
 
@@ -152,9 +160,10 @@ cmd_up() {
   fi
 
   # Security checks
-  local auth_token grafana_password
+  local auth_token grafana_password alert_webhook
   auth_token=$(grep '^AUTH_TOKEN=' .env | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
   grafana_password=$(grep '^GRAFANA_PASSWORD=' .env | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
+  alert_webhook=$(grep '^ALERT_WEBHOOK_URL=' .env | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
 
   if [ -z "$auth_token" ]; then
     echo -e "${RED}✗ AUTH_TOKEN is empty in .env. Deploy aborted for security.${NC}" >&2
@@ -164,6 +173,22 @@ cmd_up() {
   if [ -z "$grafana_password" ] || [ "$grafana_password" = "admin" ]; then
     echo -e "${RED}✗ GRAFANA_PASSWORD is unset or set to 'admin'. Deploy aborted.${NC}" >&2
     exit 1
+  fi
+
+  # Check ALERT_WEBHOOK_URL unless --no-alerts is specified
+  if [ "$no_alerts" = true ]; then
+    echo -e "${YELLOW}⚠ WARNING: Deploying with --no-alerts. Alert delivery is disabled; nobody will be notified of critical incidents!${NC}"
+  else
+    if [ -z "$alert_webhook" ]; then
+      echo -e "${RED}✗ ALERT_WEBHOOK_URL is empty in .env. A valid external webhook (Discord) is required for production alerts.${NC}" >&2
+      echo -e "  To deploy without alerts, run: scripts/deploy.sh up --no-alerts" >&2
+      exit 1
+    fi
+    if [[ "$alert_webhook" == *"localhost"* ]] || [[ "$alert_webhook" == *"127.0.0.1"* ]]; then
+      echo -e "${RED}✗ ALERT_WEBHOOK_URL contains localhost or 127.0.0.1 ($alert_webhook). A real external webhook URL is required.${NC}" >&2
+      echo -e "  To deploy without alerts, run: scripts/deploy.sh up --no-alerts" >&2
+      exit 1
+    fi
   fi
 
   # Run preflight verification
@@ -260,6 +285,21 @@ cmd_rollback() {
   echo -e "${GREEN}✓ Rollback complete.${NC}"
 }
 
+cmd_alert_test() {
+  echo "=== Triggering Alertmanager Test Alert ==="
+  cd "$PROJECT_DIR"
+
+  if ! compose_cmd ps -q alertmanager 2>/dev/null | grep -q .; then
+    echo -e "${RED}✗ Alertmanager container is not running. Deploy with monitoring enabled first.${NC}" >&2
+    exit 1
+  fi
+
+  echo "Dispatching TestAlert via amtool inside alertmanager container..."
+  compose_cmd exec -T alertmanager /bin/amtool alert add TestAlert severity=test --alertmanager.url=http://localhost:9093
+  echo ""
+  echo -e "${GREEN}check your Discord channel now${NC}"
+}
+
 cmd_down() {
   echo "Shutting down CodeRunner stack..."
   cd "$PROJECT_DIR"
@@ -285,6 +325,9 @@ case "$ACTION" in
     ;;
   up)
     cmd_up "$@"
+    ;;
+  alert-test)
+    cmd_alert_test "$@"
     ;;
   status)
     cmd_status "$@"

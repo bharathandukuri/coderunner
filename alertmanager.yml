@@ -6,10 +6,10 @@ route:
   group_wait: 10s
   group_interval: 1m
   repeat_interval: 4h
-  receiver: "default-webhook"
+  receiver: "discord"
 
 receivers:
-  - name: "default-webhook"
-    webhook_configs:
-      - url: "http://127.0.0.1:9099/webhook"
+  - name: "discord"
+    discord_configs:
+      - webhook_url: "https://discord.com/api/webhooks/123/placeholder"
         send_resolved: true
