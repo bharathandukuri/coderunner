@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import config from '../utils/config.js';
 import logger from '../utils/logger.js';
+import { isDatabaseLanguage } from '../languages/index.js';
 
 // Redis connection
 let redis = null;
@@ -93,8 +94,7 @@ export function setQueues(subQ, dbQ = null) {
  * Check if language routes to database queue
  */
 export function isDbLanguage(languageId) {
-  const id = Number(languageId);
-  return id === 8 || id === 9 || id === 10;
+  return isDatabaseLanguage(languageId);
 }
 
 /**

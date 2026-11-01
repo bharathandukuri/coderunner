@@ -2,6 +2,7 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import config from '../utils/config.js';
 import logger from '../utils/logger.js';
+import { isDatabaseLanguage } from '../languages/index.js';
 import DockerExecutor from './DockerExecutor.js';
 import IsolateExecutor from './IsolateExecutor.js';
 
@@ -14,6 +15,10 @@ function getDockerExecutor() {
     dockerExecutorInstance = new DockerExecutor();
   }
   return dockerExecutorInstance;
+}
+
+export function setDockerExecutorInstance(instance) {
+  dockerExecutorInstance = instance;
 }
 
 /**
@@ -30,12 +35,11 @@ function isIsolateAvailable() {
 
 /**
  * Get the appropriate executor based on language and system capabilities.
- * Languages 8 and 9 (PostgreSQL, MySQL) must always use DockerExecutor.
+ * Database languages (PostgreSQL, MySQL, MongoDB) must always use DockerExecutor.
  * Other languages auto-select: Isolate if available, otherwise Docker.
  */
 export function getExecutor(languageId) {
-  const id = Number(languageId);
-  if (id === 8 || id === 9) {
+  if (isDatabaseLanguage(languageId)) {
     return getDockerExecutor();
   }
 
@@ -62,8 +66,7 @@ export function getExecutor(languageId) {
  * Get the current executor type
  */
 export function getExecutorType(languageId) {
-  const id = Number(languageId);
-  if (id === 8 || id === 9) {
+  if (isDatabaseLanguage(languageId)) {
     return 'docker';
   }
 

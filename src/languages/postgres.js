@@ -3,6 +3,7 @@ export default {
   name: "PostgreSQL 16",
   category: "database",
   is_daemon: true,
+  runner: "sql-driver",
   extension: "sql",
   is_archived: false,
   source_file: "query.sql",

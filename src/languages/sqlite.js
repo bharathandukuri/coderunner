@@ -3,6 +3,7 @@ export default {
   name: "SQL (SQLite 3)",
   category: "database",
   is_daemon: false,
+  runner: "shell",
   extension: "sql",
   is_archived: false,
   source_file: "query.sql",

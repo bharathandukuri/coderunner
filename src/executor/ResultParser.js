@@ -1,4 +1,4 @@
-import { getStatusById } from '../languages/index.js';
+import { getStatusById, isDatabaseLanguage } from '../languages/index.js';
 
 class ResultParser {
   /**
@@ -59,7 +59,7 @@ class ResultParser {
       finalStderr = null;
     }
 
-    const isDatabase = submission?.language?.category === 'database' || [7, 8, 9].includes(submission?.language?.id);
+    const isDatabase = submission?.language?.category === 'database' || isDatabaseLanguage(submission?.language);
 
     return {
       status,

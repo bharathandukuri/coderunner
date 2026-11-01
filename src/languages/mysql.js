@@ -3,6 +3,7 @@ export default {
   name: 'MySQL (8.4 LTS)',
   category: 'database',
   is_daemon: true,
+  runner: 'sql-driver',
   extension: 'sql',
   source_file: 'query.sql',
   image: 'coderunner/mysql:8.4',

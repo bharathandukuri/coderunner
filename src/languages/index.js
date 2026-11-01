@@ -51,6 +51,19 @@ export function isValidLanguageId(id) {
   return languagesById.has(id);
 }
 
+/**
+ * Check if a language is a database language (requires dedicated container/daemon/pool)
+ * @param {object|number|string} languageOrId - Language object or ID
+ * @returns {boolean} True if database language
+ */
+export function isDatabaseLanguage(languageOrId) {
+  if (!languageOrId) return false;
+  const lang = typeof languageOrId === 'object'
+    ? languageOrId
+    : getLanguageById(typeof languageOrId === 'string' ? parseInt(languageOrId, 10) : languageOrId);
+  return Boolean(lang && (lang.is_daemon || (lang.category === 'database' && lang.is_daemon)));
+}
+
 // Status codes (Judge0 compatible)
 export const STATUSES = {
   1: { id: 1, description: 'In Queue' },
@@ -91,6 +104,7 @@ export default {
   getActiveLanguages,
   getAllLanguages,
   isValidLanguageId,
+  isDatabaseLanguage,
   getStatusById,
   getAllStatuses,
   STATUSES,

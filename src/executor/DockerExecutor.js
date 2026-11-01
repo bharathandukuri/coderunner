@@ -2,7 +2,7 @@ import Docker from 'dockerode';
 import { PassThrough } from 'stream';
 import config from '../utils/config.js';
 import logger from '../utils/logger.js';
-import { getStatusById } from '../languages/index.js';
+import { getStatusById, isDatabaseLanguage } from '../languages/index.js';
 import ResultParser from './ResultParser.js';
 import { getWarmPool } from './pool/WarmContainerPool.js';
 import { createDockerClient } from '../utils/dockerClient.js';
@@ -24,7 +24,7 @@ class DockerExecutor {
   async execute(submission) {
     const { language } = submission;
     let container = null;
-    const isPooled = (language.id === 8 || language.id === 9);
+    const isPooled = isDatabaseLanguage(language);
 
     const compileBudget = language.compile_cmd ? (submission.cpu_time_limit + (submission.cpu_extra_time ?? 1)) : 0;
     const wallBudget = submission.wall_time_limit || 5;
@@ -99,7 +99,7 @@ class DockerExecutor {
 
         // Run the program
         let runCmd = '';
-        if (language.id === 8 || language.id === 9) {
+        if (language.runner === 'sql-driver') {
           runCmd = `node /opt/runner/runner.js '/box/${language.source_file}' ${submission.wall_time_limit}`;
         } else {
           runCmd = this.buildRunCommand(language.run_cmd, submission.command_line_arguments);
@@ -578,7 +578,7 @@ class DockerExecutor {
           } else if (language.id === 7) {
             // SQLite
             runCmd = `sqlite3 -header -column 'file:/box/db.sqlite?nolock=1' < '${entryPoint}'`.trim();
-          } else if (language.id === 8 || language.id === 9) {
+          } else if (language.runner === 'sql-driver') {
             // PostgreSQL / MySQL
             runCmd = `node /opt/runner/runner.js '/box/${entryPoint}' ${wall_time_limit}`.trim();
           } else {

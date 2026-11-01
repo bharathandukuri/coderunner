@@ -4,7 +4,7 @@ import path from 'path';
 import { promisify } from 'util';
 import logger from '../utils/logger.js';
 import config from '../utils/config.js';
-import { getStatusById } from '../languages/index.js';
+import { getStatusById, isDatabaseLanguage } from '../languages/index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -385,7 +385,7 @@ class IsolateExecutor {
       stderr = null;
     }
 
-    const isDatabase = submission?.language?.category === 'database' || [7, 8, 9].includes(submission?.language?.id);
+    const isDatabase = submission?.language?.category === 'database' || isDatabaseLanguage(submission?.language);
 
     return {
       status,

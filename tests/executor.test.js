@@ -1,8 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
 import DockerExecutor from '../src/executor/DockerExecutor.js';
 import { buildContainerConfig, MASKED_PATHS, READONLY_PATHS } from '../src/executor/containerConfig.js';
 import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
+import { getExecutor, getExecutorType, setDockerExecutorInstance } from '../src/executor/ExecutorFactory.js';
+import { getQueueName, isDbLanguage } from '../src/queue/producer.js';
+import { isDatabaseLanguage } from '../src/languages/index.js';
 
 function createMockRedis() {
   const store = new Map();
@@ -191,5 +196,75 @@ describe('DockerExecutor and containerConfig Unit Tests (Section C)', () => {
     assert.strictEqual(updatedOpts.PidsLimit, 48);
 
     await pool.shutdown();
+  });
+});
+
+describe('Single Definition of Database Language (Item 2)', () => {
+  it('forces id 10 to DockerExecutor even when Isolate is available', () => {
+    const mockDockerExecutor = new DockerExecutor({}, { shutdown: async () => {} });
+    setDockerExecutorInstance(mockDockerExecutor);
+    try {
+      assert.strictEqual(getExecutorType(10), 'docker');
+      const executor = getExecutor(10);
+      assert.strictEqual(executor, mockDockerExecutor);
+    } finally {
+      setDockerExecutorInstance(null);
+    }
+  });
+
+  it('routes id 10 to the database queue (submissions-db)', () => {
+    assert.strictEqual(isDbLanguage(10), true);
+    assert.strictEqual(getQueueName(10), 'submissions-db');
+  });
+
+  it('preserves exact behavior for ids 8 and 9 (PostgreSQL, MySQL)', () => {
+    assert.strictEqual(getExecutorType(8), 'docker');
+    assert.strictEqual(getExecutorType(9), 'docker');
+    assert.strictEqual(isDbLanguage(8), true);
+    assert.strictEqual(isDbLanguage(9), true);
+    assert.strictEqual(getQueueName(8), 'submissions-db');
+    assert.strictEqual(getQueueName(9), 'submissions-db');
+    assert.strictEqual(isDatabaseLanguage(8), true);
+    assert.strictEqual(isDatabaseLanguage(9), true);
+    assert.strictEqual(isDatabaseLanguage(10), true);
+
+    // Non-database language
+    assert.strictEqual(isDatabaseLanguage(5), false);
+    assert.strictEqual(isDbLanguage(5), false);
+    assert.strictEqual(getQueueName(5), 'submissions');
+  });
+
+  it('grep test fails if literal === 8 || ... === 9 language id check reappears in src/', () => {
+    function getFiles(dir) {
+      let results = [];
+      const list = fs.readdirSync(dir);
+      for (const file of list) {
+        const fullPath = path.join(dir, file);
+        const stat = fs.statSync(fullPath);
+        if (stat && stat.isDirectory()) {
+          results = results.concat(getFiles(fullPath));
+        } else if (fullPath.endsWith('.js')) {
+          results.push(fullPath);
+        }
+      }
+      return results;
+    }
+
+    const srcFiles = getFiles(path.resolve(process.cwd(), 'src'));
+    const offendingFiles = [];
+    const idCheckPattern = /(?:language(?:\.id)?|languageId|\bid)\s*===\s*8\s*\|\|\s*(?:(?:language(?:\.id)?|languageId|\bid)\s*===\s*)?9/i;
+
+    for (const file of srcFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      if (idCheckPattern.test(content)) {
+        offendingFiles.push(file);
+      }
+    }
+
+    assert.deepStrictEqual(
+      offendingFiles,
+      [],
+      `Found hardcoded database language id checks (=== 8 || ... === 9) in:\n${offendingFiles.join('\n')}`
+    );
   });
 });

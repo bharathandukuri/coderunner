@@ -3,6 +3,7 @@ export default {
   name: 'MongoDB (8.0 LTS)',
   category: 'database',
   is_daemon: true,
+  runner: 'shell',
   extension: 'js',
   is_archived: false,
   source_file: 'query.js',

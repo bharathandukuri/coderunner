@@ -325,12 +325,8 @@ export class WarmContainerPool {
       for (const pool of uniquePools) {
         if (pool.languages && pool.languages.length > 0) {
           this.checkReplenish(pool.languages[0]);
-        } else if (pool.name === 'postgres') {
-          this.checkReplenish(8);
-        } else if (pool.name === 'mysql') {
-          this.checkReplenish(9);
-        } else if (pool.name === 'mongodb') {
-          this.checkReplenish(10);
+        } else if (pool.langId) {
+          this.checkReplenish(pool.langId);
         }
       }
     }
@@ -667,7 +663,7 @@ export class WarmContainerPool {
     for (const pool of uniquePools) {
       if (!pool.available || pool.available.length === 0) continue;
 
-      const langId = pool.langId || (pool.languages && pool.languages[0]) || (pool.name === 'postgres' ? 8 : (pool.name === 'mysql' ? 9 : (pool.name === 'mongodb' ? 10 : null)));
+      const langId = pool.langId || (pool.languages && pool.languages[0]);
 
       const candidates = [...pool.available];
       for (const container of candidates) {
