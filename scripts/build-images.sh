@@ -60,5 +60,12 @@ if [ -d "$PROJECT_DIR/docker/images/multi" ]; then
   docker build -t coderunner/multi:latest "$PROJECT_DIR/docker/images/multi/"
 fi
 
+if [ -d "$PROJECT_DIR/docker/images/mongodb" ]; then
+  if [ "${ENABLE_MONGODB:-false}" = "true" ] || [ "${1:-}" = "all" ] || [ $# -eq 0 ]; then
+    echo "Building MongoDB 8.0 image..."
+    docker build -t coderunner/mongodb:8.0 "$PROJECT_DIR/docker/images/mongodb/"
+  fi
+fi
+
 echo ""
 echo "All requested container images built successfully."

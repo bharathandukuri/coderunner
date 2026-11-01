@@ -141,6 +141,7 @@ export class WarmContainerPool {
     };
 
     if (enableMongo) {
+      const mongoLang = getLanguageById(10);
       this.pools[10] = {
         available: [],
         waiters: [],
@@ -149,7 +150,7 @@ export class WarmContainerPool {
         circuitState: 'closed',
         circuitOpenUntil: 0,
         targetPoolSize: this.mongodbPoolSize,
-        image: 'mongo:8.0',
+        image: mongoLang?.image || 'coderunner/mongodb:8.0',
         name: 'mongodb',
         langId: 10,
         isDaemon: true,

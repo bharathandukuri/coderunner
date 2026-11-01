@@ -50,7 +50,7 @@ The formulas below are derived directly from empirical `docker stats` measuremen
 | **Host OS Baseline**        | ~350 MiB | ~350 MiB          | Kernel, systemd, journald, SSH, Docker daemon                                                                                    |
 | **PostgreSQL 16 Container** | ~57 MiB  | ~75 MiB           | Single isolated warm PostgreSQL instance                                                                                         |
 | **MySQL 8.4 Container**     | ~243 MiB | ~280 MiB          | Single isolated warm MySQL instance with Performance Schema off                                                                  |
-| **MongoDB 8.0 Container**   | ~90 MiB  | ~97 MiB           | Single isolated warm MongoDB instance with WiredTiger cache 0.25GB                                                               |
+| **MongoDB 8.0 Container**   | ~90 MiB  | ~97 MiB           | Single isolated warm MongoDB instance with WiredTiger cache 0.25GB (`coderunner/mongodb:8.0`, ~694 MB multi-stage build via `scripts/build-images.sh`) |
 | **Isolate Code Job**        | 0 MiB    | ~15–30 MiB        | Process in Linux namespaces (allocated on demand, released immediately)                                                          |
 | **Docker Code Container**   | ~25 MiB  | ~45–128 MiB       | Cold or pooled language runner container                                                                                         |
 

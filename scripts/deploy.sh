@@ -137,6 +137,20 @@ cmd_build() {
     docker build -t coderunner/multi:latest docker/images/multi
   fi
 
+  local enable_mongo="${ENABLE_MONGODB:-false}"
+  if [ -f "$PROJECT_DIR/.env" ]; then
+    local env_mongo
+    env_mongo=$(grep '^ENABLE_MONGODB=' "$PROJECT_DIR/.env" 2>/dev/null | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
+    if [ -n "$env_mongo" ]; then
+      enable_mongo="$env_mongo"
+    fi
+  fi
+
+  if [ "$enable_mongo" = "true" ] && [ -d docker/images/mongodb ]; then
+    echo "Building coderunner/mongodb:8.0..."
+    docker build -t coderunner/mongodb:8.0 docker/images/mongodb
+  fi
+
   echo "Building CodeRunner API and Worker images..."
   compose_cmd build api worker worker-db
 

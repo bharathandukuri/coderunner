@@ -50,6 +50,42 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Read sizing and feature flags from .env and environment
+W_CONCURRENCY=2
+W_DB_CONCURRENCY=2
+PG_POOL=2
+MY_POOL=2
+MONGO_POOL=0
+MONITORING_ACTIVE=true
+ENABLE_MONGO=false
+
+if [ -f "$PROJECT_DIR/.env" ]; then
+  W_CONCURRENCY=$(grep '^WORKER_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  W_DB_CONCURRENCY=$(grep '^WORKER_DB_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  PG_POOL=$(grep '^POSTGRES_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  MY_POOL=$(grep '^MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  MONGO_POOL=$(grep '^MONGODB_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 0)
+  if grep -q '^ENABLE_MONITORING=false' "$PROJECT_DIR/.env" 2>/dev/null; then
+    MONITORING_ACTIVE=false
+  fi
+  if grep -q '^ENABLE_MONGODB=true' "$PROJECT_DIR/.env" 2>/dev/null; then
+    ENABLE_MONGO=true
+  fi
+fi
+
+if [ "${ENABLE_MONGODB:-}" = "true" ]; then
+  ENABLE_MONGO=true
+elif [ "${ENABLE_MONGODB:-}" = "false" ]; then
+  ENABLE_MONGO=false
+fi
+
+# Fallback defaults for empty values
+W_CONCURRENCY=${W_CONCURRENCY:-2}
+W_DB_CONCURRENCY=${W_DB_CONCURRENCY:-2}
+PG_POOL=${PG_POOL:-2}
+MY_POOL=${MY_POOL:-2}
+MONGO_POOL=${MONGO_POOL:-0}
+
 echo "================================================="
 echo "  CodeRunner Production Preflight Verification"
 echo "================================================="
@@ -75,6 +111,18 @@ if docker compose version >/dev/null 2>&1; then
 else
   echo -e "${RED}✗ Docker Compose v2 plugin missing${NC}"
   ERRORS=$((ERRORS + 1))
+fi
+
+# Verify local MongoDB image when ENABLE_MONGODB=true
+if [ "$ENABLE_MONGO" = "true" ]; then
+  echo -n "      Checking local MongoDB image (coderunner/mongodb:8.0)... "
+  if command -v docker >/dev/null 2>&1 && docker image inspect coderunner/mongodb:8.0 >/dev/null 2>&1; then
+    echo -e "${GREEN}✓ (found locally)${NC}"
+  else
+    echo -e "${RED}✗ Required image 'coderunner/mongodb:8.0' is missing locally${NC}"
+    echo "      Run 'scripts/build-images.sh' or 'scripts/deploy.sh build' before deploying with ENABLE_MONGODB=true."
+    ERRORS=$((ERRORS + 1))
+  fi
 fi
 
 # 2. cgroup v2
@@ -125,42 +173,6 @@ TOTAL_MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 AVAIL_MEM_MB=$(free -m | awk '/^Mem:/{print $7}')
 DISK_AVAIL_MB=$(df -m "$PROJECT_DIR" | awk 'NR==2{print $4}')
 HOST_VCPUS=$(nproc || echo 1)
-
-# Read sizing parameters from .env if present
-W_CONCURRENCY=2
-W_DB_CONCURRENCY=2
-PG_POOL=2
-MY_POOL=2
-MONGO_POOL=0
-MONITORING_ACTIVE=true
-ENABLE_MONGO=false
-
-if [ -f "$PROJECT_DIR/.env" ]; then
-  W_CONCURRENCY=$(grep '^WORKER_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  W_DB_CONCURRENCY=$(grep '^WORKER_DB_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  PG_POOL=$(grep '^POSTGRES_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  MY_POOL=$(grep '^MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  MONGO_POOL=$(grep '^MONGODB_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 0)
-  if grep -q '^ENABLE_MONITORING=false' "$PROJECT_DIR/.env" 2>/dev/null; then
-    MONITORING_ACTIVE=false
-  fi
-  if grep -q '^ENABLE_MONGODB=true' "$PROJECT_DIR/.env" 2>/dev/null; then
-    ENABLE_MONGO=true
-  fi
-fi
-
-if [ "${ENABLE_MONGODB:-}" = "true" ]; then
-  ENABLE_MONGO=true
-elif [ "${ENABLE_MONGODB:-}" = "false" ]; then
-  ENABLE_MONGO=false
-fi
-
-# Fallback defaults for empty values
-W_CONCURRENCY=${W_CONCURRENCY:-2}
-W_DB_CONCURRENCY=${W_DB_CONCURRENCY:-2}
-PG_POOL=${PG_POOL:-2}
-MY_POOL=${MY_POOL:-2}
-MONGO_POOL=${MONGO_POOL:-0}
 
 # Formula derived in docs/limits.md:
 # Base services: 150MB core (360MB with monitoring)

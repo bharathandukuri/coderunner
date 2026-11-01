@@ -265,7 +265,7 @@ If a deployment fails:
 ## Security Considerations: MongoDB Support
 
 MongoDB (language ID 10) is **opt-in and disabled by default** (`ENABLE_MONGODB=false`). When enabled:
-- **Sandbox Boundaries**: MongoDB queries execute inside an ephemeral, hardened container (`mongo:8.0`) under unprivileged user `mongodb` (uid 999).
+- **Sandbox Boundaries**: MongoDB queries execute inside an ephemeral, hardened container (`coderunner/mongodb:8.0`, built via multi-stage build in `docker/images/mongodb/Dockerfile`, ~694 MB) under unprivileged user `runner` (uid 1001). Preflight verifies this image is present locally before deployment. Build it via `scripts/build-images.sh` or `ENABLE_MONGODB=true scripts/deploy.sh build`.
 - **Hardening Flags**: `NetworkMode: none` (completely air-gapped), `CapDrop: ALL` (all Linux capabilities dropped), `ReadonlyRootfs: true`, `no-new-privileges: true`, and strict memory (`512MB`) and pids (`64`) ceilings.
 - **Node.js Environment**: Because `mongosh` is implemented in Node.js, user scripts have access to Node globals (`process.env`, `require('fs')`). User code can read files within the container's isolated rootfs (such as `/etc/passwd`), identical to untrusted Python or Node.js submissions. Subprocesses via `child_process.execSync` are blocked by the pids ceiling (`EAGAIN`) and lack system capabilities. Administrative commands (`shutdownServer`, `shutdown`) are blocked by CodeRunner's static analyzer before execution.
 - If running untrusted multi-tenant workloads, keep `ENABLE_MONGODB=false` unless MongoDB query execution is explicitly required.

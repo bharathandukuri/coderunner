@@ -1,6 +1,9 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { WarmContainerPool, _resetWarmPool, peekWarmPool } from '../src/executor/pool/WarmContainerPool.js';
 
 class MockStream extends EventEmitter {
@@ -1325,7 +1328,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     assert.strictEqual(mongoLang.id, 10);
     assert.strictEqual(mongoLang.category, 'database');
     assert.strictEqual(mongoLang.is_daemon, true);
-    assert.strictEqual(mongoLang.image, 'mongo:8.0');
+    assert.strictEqual(mongoLang.image, 'coderunner/mongodb:8.0');
 
     const mockDocker = createMockDocker();
     const mockRedis = createMockRedis();
@@ -1339,12 +1342,12 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     });
 
     assert.strictEqual(pool.pools[10].targetPoolSize, 2);
-    assert.strictEqual(pool.pools[10].image, 'mongo:8.0');
+    assert.strictEqual(pool.pools[10].image, mongoLang.image);
     assert.strictEqual(pool.pools[10].isDaemon, true);
 
     const acquired = await pool.acquire(10);
     assert.ok(acquired, 'Must acquire MongoDB container');
-    assert.strictEqual(acquired.opts.Image, 'mongo:8.0');
+    assert.strictEqual(acquired.opts.Image, mongoLang.image);
     assert.deepStrictEqual(acquired.opts.Cmd, pool.pools[10].cmd);
 
     await pool.release(acquired);
@@ -1602,6 +1605,62 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       assert(memWithMongo > memNoMongo, `Memory with Mongo (${memWithMongo}MB) must exceed memory without Mongo (${memNoMongo}MB)`);
     } finally {
       process.env.ENABLE_MONGODB = origEnv;
+    }
+  });
+
+  it('35. Single image name definition and preflight local image verification', async () => {
+    const { getLanguageById } = await import('../src/languages/index.js');
+    const mongoLang = getLanguageById(10);
+
+    // 1. Image name comes from one place: src/languages/mongodb.js
+    assert.strictEqual(mongoLang.image, 'coderunner/mongodb:8.0');
+
+    // Ensure WarmContainerPool reads it from language definition without hardcoding
+    const warmPoolSrc = fs.readFileSync(path.resolve('src/executor/pool/WarmContainerPool.js'), 'utf-8');
+    assert.doesNotMatch(warmPoolSrc, /image:\s*['"]mongo:8\.0['"]/);
+    assert.doesNotMatch(warmPoolSrc, /image:\s*['"]coderunner\/mongodb:8\.0['"]/);
+
+    // 2. Preflight fails when local image is missing and passes when present (mock docker inspect)
+    const { execSync } = await import('node:child_process');
+    const tempBinDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-test-'));
+
+    try {
+      // Mock docker failing on coderunner/mongodb:8.0 inspect
+      const mockFailingDocker = path.join(tempBinDir, 'docker');
+      fs.writeFileSync(
+        mockFailingDocker,
+        `#!/usr/bin/env bash\nif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "coderunner/mongodb:8.0" ]; then exit 1; fi\nexec /usr/bin/docker "$@"\n`,
+        { mode: 0o755 }
+      );
+
+      let failed = false;
+      try {
+        execSync(
+          `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh`,
+          { encoding: 'utf-8', stdio: 'pipe' }
+        );
+      } catch (err) {
+        failed = true;
+        const output = (err.stdout || '') + (err.stderr || '');
+        assert.match(output, /Required image 'coderunner\/mongodb:8.0' is missing locally/);
+      }
+      assert.strictEqual(failed, true, 'Preflight must fail when image is missing');
+
+      // Mock docker passing on coderunner/mongodb:8.0 inspect
+      const mockPassingDocker = path.join(tempBinDir, 'docker');
+      fs.writeFileSync(
+        mockPassingDocker,
+        `#!/usr/bin/env bash\nif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "coderunner/mongodb:8.0" ]; then exit 0; fi\nexec /usr/bin/docker "$@"\n`,
+        { mode: 0o755 }
+      );
+
+      const passOutput = execSync(
+        `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh`,
+        { encoding: 'utf-8', stdio: 'pipe' }
+      );
+      assert.match(passOutput, /Checking local MongoDB image \(coderunner\/mongodb:8.0\)\.\.\. .*✓ \(found locally\)/);
+    } finally {
+      fs.rmSync(tempBinDir, { recursive: true, force: true });
     }
   });
 });

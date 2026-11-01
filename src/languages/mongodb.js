@@ -9,7 +9,7 @@ export default {
   source_file: 'query.js',
   compile_cmd: null,
   run_cmd: 'HOME=/tmp mongosh --norc --quiet /box/query.js',
-  image: 'mongo:8.0',
+  image: 'coderunner/mongodb:8.0',
   default_time_limit: 5,
   max_time_limit: 30,
   min_memory: 0,
