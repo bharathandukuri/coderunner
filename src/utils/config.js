@@ -4,6 +4,7 @@ const config = {
     nodeEnv: process.env.NODE_ENV || 'development',
     apiBaseUrl: process.env.API_BASE_URL || 'http://localhost:3000',
     bodyLimit: process.env.BODY_LIMIT || '5mb',
+    trustProxy: process.env.TRUST_PROXY === 'false' ? false : 1,
   },
 
   redis: {
@@ -32,6 +33,12 @@ const config = {
 
   worker: {
     concurrency: process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4,
+  },
+
+  queue: {
+    maxQueueDepth: process.env.MAX_QUEUE_DEPTH ? parseInt(process.env.MAX_QUEUE_DEPTH, 10) : ((process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4) * 25),
+    maxConcurrentWaitRequests: process.env.MAX_CONCURRENT_WAIT_REQUESTS ? parseInt(process.env.MAX_CONCURRENT_WAIT_REQUESTS, 10) : ((process.env.WORKER_CONCURRENCY !== undefined ? Number(process.env.WORKER_CONCURRENCY) : 4) * 25),
+    retryAfterSeconds: parseInt(process.env.RETRY_AFTER_SECONDS, 10) || 5,
   },
 
   cache: {

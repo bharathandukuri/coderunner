@@ -84,6 +84,11 @@ export function setRedis(r) {
   redis = r;
 }
 
+export function setQueues(subQ, dbQ = null) {
+  submissionQueue = subQ;
+  dbSubmissionQueue = dbQ;
+}
+
 /**
  * Get submission queue
  */

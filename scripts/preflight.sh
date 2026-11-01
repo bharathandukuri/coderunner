@@ -119,19 +119,64 @@ else
   echo -e "${YELLOW}ℹ Optional: gVisor (runsc) not found. Fallback to runc sandbox.${NC}"
 fi
 
-# 6. Capacity: RAM & Disk against docs/capacity.md formula
-echo -n "[7/8] Checking Host RAM and Disk Capacity... "
+# 6. Capacity: RAM & Disk against docs/limits.md formula
+echo -n "[7/8] Checking Host RAM and CPU Sizing (docs/limits.md formula)... "
 TOTAL_MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 AVAIL_MEM_MB=$(free -m | awk '/^Mem:/{print $7}')
 DISK_AVAIL_MB=$(df -m "$PROJECT_DIR" | awk 'NR==2{print $4}')
+HOST_VCPUS=$(nproc || echo 1)
 
-MEM_MIN_RECOMMENDED=2048 # Minimum 2GB for concurrency=2 budget worker
+# Read sizing parameters from .env if present
+W_CONCURRENCY=2
+W_DB_CONCURRENCY=2
+PG_POOL=2
+MY_POOL=2
+MONITORING_ACTIVE=true
+
+if [ -f "$PROJECT_DIR/.env" ]; then
+  W_CONCURRENCY=$(grep '^WORKER_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  W_DB_CONCURRENCY=$(grep '^WORKER_DB_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  PG_POOL=$(grep '^POSTGRES_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  MY_POOL=$(grep '^MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
+  if grep -q '^ENABLE_MONITORING=false' "$PROJECT_DIR/.env" 2>/dev/null; then
+    MONITORING_ACTIVE=false
+  fi
+fi
+
+# Fallback defaults for empty values
+W_CONCURRENCY=${W_CONCURRENCY:-2}
+W_DB_CONCURRENCY=${W_DB_CONCURRENCY:-2}
+PG_POOL=${PG_POOL:-2}
+MY_POOL=${MY_POOL:-2}
+
+# Formula derived in docs/limits.md:
+# Base services: 150MB core (360MB with monitoring)
+# OS reserve: 350MB
+# PostgreSQL: (pool_size + db_concurrency) * 75MB
+# MySQL: (pool_size + db_concurrency) * 280MB
+# Worker Isolate: concurrency * 250MB
+BASE_MEM=360
+if [ "$MONITORING_ACTIVE" = "false" ]; then
+  BASE_MEM=150
+fi
+OS_RESERVE=350
+PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
+MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
+ISO_MEM=$(( W_CONCURRENCY * 250 ))
+MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + ISO_MEM ))
+
+# Minimum vCPUs: 1 vCPU for budget concurrency 2, 2 vCPUs for higher concurrency
+MIN_VCPUS_RECOMMENDED=1
+if [ "$(( W_CONCURRENCY + W_DB_CONCURRENCY ))" -gt 3 ]; then
+  MIN_VCPUS_RECOMMENDED=2
+fi
+
 DISK_MIN_RECOMMENDED=3072 # 3GB free disk
 
-if [ "$AVAIL_MEM_MB" -ge 400 ] && [ "$TOTAL_MEM_MB" -ge 1500 ]; then
-  echo -e "${GREEN}✓ RAM: ${TOTAL_MEM_MB}MB total (${AVAIL_MEM_MB}MB available) | Disk: ${DISK_AVAIL_MB}MB available${NC}"
+if [ "$TOTAL_MEM_MB" -ge "$MEM_MIN_RECOMMENDED" ] && [ "$HOST_VCPUS" -ge "$MIN_VCPUS_RECOMMENDED" ]; then
+  echo -e "${GREEN}✓ RAM: ${TOTAL_MEM_MB}MB total (min recommended: ${MEM_MIN_RECOMMENDED}MB) | vCPUs: ${HOST_VCPUS} (min: ${MIN_VCPUS_RECOMMENDED})${NC}"
 else
-  echo -e "${YELLOW}⚠ Low memory: ${TOTAL_MEM_MB}MB total, ${AVAIL_MEM_MB}MB available. Sizing formula recommends >= ${MEM_MIN_RECOMMENDED}MB.${NC}"
+  echo -e "${YELLOW}⚠ Sizing warning: Host has ${TOTAL_MEM_MB}MB RAM, ${HOST_VCPUS} vCPUs. Sizing formula recommends >= ${MEM_MIN_RECOMMENDED}MB RAM and >= ${MIN_VCPUS_RECOMMENDED} vCPU(s) for configured concurrency.${NC}"
   WARNINGS=$((WARNINGS + 1))
 fi
 

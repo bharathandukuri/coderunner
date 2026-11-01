@@ -11,6 +11,11 @@ import routes from './routes/index.js';
 
 const app = express();
 
+// Trust proxy (Caddy / reverse proxy) so rate limiters and logs see real client IPs
+if (config.server.trustProxy !== false) {
+  app.set('trust proxy', config.server.trustProxy);
+}
+
 // Security middleware
 app.use(helmet());
 app.use(cors());

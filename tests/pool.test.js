@@ -1166,5 +1166,105 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       setRedis(null);
     }
   });
+
+  it('30. API backpressure: returns 503 with Retry-After on queue full and wait=true cap (Section 0)', async () => {
+    const { backpressureMiddleware } = await import('../src/api/routes/submissions.js');
+    const { setQueues } = await import('../src/queue/producer.js');
+    const config = (await import('../src/utils/config.js')).default;
+    const { EventEmitter } = await import('node:events');
+
+    // Test 1: Queue depth backpressure
+    const savedMaxQueue = config.queue.maxQueueDepth;
+    const savedMaxWait = config.queue.maxConcurrentWaitRequests;
+
+    try {
+      config.queue.maxQueueDepth = 2;
+      config.queue.maxConcurrentWaitRequests = 2;
+
+      // Mock queue returning 3 items waiting
+      setQueues({
+        getWaitingCount: async () => 3,
+        getActiveCount: async () => 0,
+        getCompletedCount: async () => 0,
+        getFailedCount: async () => 0,
+      });
+
+      let statusCode = 0;
+      let headers = {};
+      let responseBody = null;
+      let nextCalled = false;
+
+      const mockRes = {
+        set(k, v) { headers[k] = v; },
+        status(code) { statusCode = code; return this; },
+        json(data) { responseBody = data; return this; },
+        on() {},
+      };
+
+      await backpressureMiddleware({ query: {} }, mockRes, () => { nextCalled = true; });
+
+      assert.strictEqual(nextCalled, false, 'next() should not be called when queue is full');
+      assert.strictEqual(statusCode, 503, 'Must return HTTP 503');
+      assert.strictEqual(headers['Retry-After'], String(config.queue.retryAfterSeconds));
+      assert(responseBody.error.includes('Service Unavailable'));
+
+      // Test 2: wait=true concurrency cap
+      // Set queue to empty
+      setQueues({
+        getWaitingCount: async () => 0,
+        getActiveCount: async () => 0,
+        getCompletedCount: async () => 0,
+        getFailedCount: async () => 0,
+      });
+
+      const resList = [];
+      // Send 2 requests with wait=true (should pass)
+      for (let i = 0; i < 2; i++) {
+        let passed = false;
+        const resObj = new EventEmitter();
+        resObj.set = (k, v) => { headers[k] = v; };
+        resObj.status = (code) => { statusCode = code; return resObj; };
+        resObj.json = (data) => { responseBody = data; return resObj; };
+        resList.push(resObj);
+
+        await backpressureMiddleware({ query: { wait: 'true' } }, resObj, () => { passed = true; });
+        assert.strictEqual(passed, true, `Wait request ${i} should be permitted within cap`);
+      }
+
+      // 3rd request with wait=true should exceed cap (2) and return 503
+      let passedThird = false;
+      statusCode = 0;
+      const thirdRes = new EventEmitter();
+      thirdRes.set = (k, v) => { headers[k] = v; };
+      thirdRes.status = (code) => { statusCode = code; return thirdRes; };
+      thirdRes.json = (data) => { responseBody = data; return thirdRes; };
+
+      await backpressureMiddleware({ query: { wait: 'true' } }, thirdRes, () => { passedThird = true; });
+      assert.strictEqual(passedThird, false, '3rd wait request must be rejected');
+      assert.strictEqual(statusCode, 503, 'Must return HTTP 503 for wait cap');
+      assert.strictEqual(headers['Retry-After'], String(config.queue.retryAfterSeconds));
+
+      // Finishing one request decrements count
+      resList[0].emit('finish');
+
+      // Now a new wait=true request should succeed
+      let passedFourth = false;
+      const fourthRes = new EventEmitter();
+      fourthRes.set = (k, v) => { headers[k] = v; };
+      fourthRes.status = (code) => { statusCode = code; return fourthRes; };
+      fourthRes.json = (data) => { responseBody = data; return fourthRes; };
+
+      await backpressureMiddleware({ query: { wait: 'true' } }, fourthRes, () => { passedFourth = true; });
+      assert.strictEqual(passedFourth, true, 'Wait request should succeed after previous finishes');
+
+      // Cleanup remaining
+      resList[1].emit('finish');
+      fourthRes.emit('finish');
+    } finally {
+      config.queue.maxQueueDepth = savedMaxQueue;
+      config.queue.maxConcurrentWaitRequests = savedMaxWait;
+      setQueues(null, null);
+    }
+  });
 });
 

@@ -9,7 +9,7 @@ import {
   sanitizeCommandLineArgs,
 } from '../middleware/validation.js';
 import { submissionsRateLimitMiddleware } from '../middleware/rateLimit.js';
-import { addSubmission, getSubmission, deleteSubmission, getSubscriberRedis } from '../../queue/producer.js';
+import { addSubmission, getSubmission, deleteSubmission, getSubscriberRedis, getQueueStats } from '../../queue/producer.js';
 import { getLanguageById, getStatusById } from '../../languages/index.js';
 import { decodeIfNeeded, encodeIfNeeded } from '../../utils/base64.js';
 import config from '../../utils/config.js';
@@ -159,6 +159,58 @@ function resolveTimeLimits(data, language) {
   return { effectiveWall, effectiveCpu };
 }
 
+let activeWaitRequests = 0;
+
+export function getActiveWaitCount() {
+  return activeWaitRequests;
+}
+
+/**
+ * Backpressure middleware:
+ * Rejects requests with 503 and Retry-After when BullMQ waiting queue is full,
+ * or when active concurrent wait=true requests exceed limit.
+ */
+export async function backpressureMiddleware(req, res, next) {
+  try {
+    const stats = await getQueueStats();
+    const waiting = stats?.submissions?.in_queue || 0;
+    const maxQueue = config.queue?.maxQueueDepth || 100;
+    if (waiting >= maxQueue) {
+      res.set('Retry-After', String(config.queue?.retryAfterSeconds || 5));
+      return res.status(503).json({
+        error: 'Service Unavailable',
+        message: `Queue depth (${waiting}) exceeds maximum capacity (${maxQueue}). Please retry later.`,
+        retry_after: config.queue?.retryAfterSeconds || 5,
+      });
+    }
+
+    if (req.query?.wait === 'true') {
+      const maxWaitReqs = config.queue?.maxConcurrentWaitRequests || 100;
+      if (activeWaitRequests >= maxWaitReqs) {
+        res.set('Retry-After', String(config.queue?.retryAfterSeconds || 5));
+        return res.status(503).json({
+          error: 'Service Unavailable',
+          message: `Concurrent wait=true requests (${activeWaitRequests}) capped at ${maxWaitReqs}. Please poll or retry later.`,
+          retry_after: config.queue?.retryAfterSeconds || 5,
+        });
+      }
+      activeWaitRequests++;
+      let decremented = false;
+      const decrement = () => {
+        if (!decremented) {
+          decremented = true;
+          activeWaitRequests = Math.max(0, activeWaitRequests - 1);
+        }
+      };
+      res.on('finish', decrement);
+      res.on('close', decrement);
+    }
+    next();
+  } catch (err) {
+    next();
+  }
+}
+
 // Map of active waiters: token -> Set<resolveFunction>
 const activeWaiters = new Map();
 let sharedSubListenerAttached = false;
@@ -301,7 +353,7 @@ async function waitForResult(token, maxWait = 25000) {
  * POST /submissions/multi/batch
  * Submit multiple multi-file programs
  */
-router.post('/multi/batch', submissionsRateLimitMiddleware, validateBatchMultiSubmission, async (req, res, next) => {
+router.post('/multi/batch', submissionsRateLimitMiddleware, backpressureMiddleware, validateBatchMultiSubmission, async (req, res, next) => {
   try {
     const runs = req.validatedBody.runs || req.validatedBody.submissions;
     const results = [];
@@ -379,7 +431,7 @@ router.post('/multi/batch', submissionsRateLimitMiddleware, validateBatchMultiSu
  * POST /submissions/multi
  * Submit a multi-file program
  */
-router.post('/multi', submissionsRateLimitMiddleware, validateMultiSubmission, async (req, res, next) => {
+router.post('/multi', submissionsRateLimitMiddleware, backpressureMiddleware, validateMultiSubmission, async (req, res, next) => {
   try {
     const data = req.validatedBody;
     const base64Encoded = req.query.base64_encoded === 'true';
@@ -468,7 +520,7 @@ router.post('/multi', submissionsRateLimitMiddleware, validateMultiSubmission, a
  * POST /submissions/batch
  * Submit multiple single-file programs
  */
-router.post('/batch', submissionsRateLimitMiddleware, validateBatchSubmission, async (req, res, next) => {
+router.post('/batch', submissionsRateLimitMiddleware, backpressureMiddleware, validateBatchSubmission, async (req, res, next) => {
   try {
     const submissions = req.validatedBody.runs || req.validatedBody.submissions;
     const base64Encoded = req.query.base64_encoded === 'true';
@@ -578,7 +630,7 @@ router.get('/batch', async (req, res, next) => {
  * POST /submissions
  * Submit a single-file program
  */
-router.post('/', submissionsRateLimitMiddleware, validateSubmission, async (req, res, next) => {
+router.post('/', submissionsRateLimitMiddleware, backpressureMiddleware, validateSubmission, async (req, res, next) => {
   try {
     const data = req.validatedBody;
     const base64Encoded = req.query.base64_encoded === 'true';

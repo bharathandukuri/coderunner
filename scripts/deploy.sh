@@ -14,6 +14,22 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$PROJECT_DIR/docker-compose.prod.yml"
 PREV_TAG_FILE="$PROJECT_DIR/.prev_tag"
 
+compose_cmd() {
+  local mon="${ENABLE_MONITORING:-true}"
+  if [ -f "$PROJECT_DIR/.env" ]; then
+    local env_mon
+    env_mon=$(grep '^ENABLE_MONITORING=' "$PROJECT_DIR/.env" 2>/dev/null | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
+    if [ -n "$env_mon" ]; then
+      mon="$env_mon"
+    fi
+  fi
+  if [ "$mon" = "false" ]; then
+    docker compose -f "$COMPOSE_FILE" "$@"
+  else
+    docker compose -f "$COMPOSE_FILE" --profile monitoring "$@"
+  fi
+}
+
 show_help() {
   cat << 'EOF'
 Usage: scripts/deploy.sh <command> [options]
@@ -121,7 +137,7 @@ cmd_build() {
   fi
 
   echo "Building CodeRunner API and Worker images..."
-  docker compose -f "$COMPOSE_FILE" build api worker worker-db
+  compose_cmd build api worker worker-db
 
   echo -e "${GREEN}✓ All images built successfully tagged ($current_sha).${NC}"
 }
@@ -157,11 +173,11 @@ cmd_up() {
 
   # Validate Compose configuration
   echo "Validating compose configuration..."
-  docker compose -f "$COMPOSE_FILE" config >/dev/null
+  compose_cmd config >/dev/null
 
   # Start services
   echo "Deploying containers..."
-  docker compose -f "$COMPOSE_FILE" up -d
+  compose_cmd up -d
 
   # Wait for health
   echo "Waiting for services to become healthy..."
@@ -184,12 +200,18 @@ cmd_up() {
     echo -e "${GREEN}✓ CodeRunner stack started and responding healthy!${NC}"
   else
     echo -e "${YELLOW}⚠ Health check timed out after 60s. Inspecting container logs...${NC}"
-    docker compose -f "$COMPOSE_FILE" ps
+    compose_cmd ps
   fi
 
   # Validate Caddy configuration inside container
-  if docker compose -f "$COMPOSE_FILE" ps -q caddy >/dev/null 2>&1; then
-    docker compose -f "$COMPOSE_FILE" exec -T caddy caddy validate --config /etc/caddy/Caddyfile 2>/dev/null || true
+  if compose_cmd ps -q caddy >/dev/null 2>&1; then
+    compose_cmd exec -T caddy caddy validate --config /etc/caddy/Caddyfile 2>/dev/null || true
+  fi
+
+  # Validate Docker proxy isolation
+  if [ -f "$SCRIPT_DIR/verify-docker-proxy.sh" ]; then
+    echo "Verifying Docker socket proxy isolation..."
+    bash "$SCRIPT_DIR/verify-docker-proxy.sh" || echo -e "${YELLOW}⚠ Docker proxy check reported warnings.${NC}"
   fi
 
   local domain
@@ -212,12 +234,12 @@ cmd_up() {
 
 cmd_status() {
   cd "$PROJECT_DIR"
-  docker compose -f "$COMPOSE_FILE" ps
+  compose_cmd ps
 }
 
 cmd_logs() {
   cd "$PROJECT_DIR"
-  docker compose -f "$COMPOSE_FILE" logs --tail=100 -f "$@"
+  compose_cmd logs --tail=100 -f "$@"
 }
 
 cmd_rollback() {
@@ -234,14 +256,14 @@ cmd_rollback() {
   echo "Rolling back to tag: $prev_tag"
 
   # Restart compose
-  docker compose -f "$COMPOSE_FILE" up -d --force-recreate
+  compose_cmd up -d --force-recreate
   echo -e "${GREEN}✓ Rollback complete.${NC}"
 }
 
 cmd_down() {
   echo "Shutting down CodeRunner stack..."
   cd "$PROJECT_DIR"
-  docker compose -f "$COMPOSE_FILE" down
+  docker compose -f "$COMPOSE_FILE" --profile monitoring down
   echo -e "${GREEN}✓ Stack stopped.${NC}"
 }
 
