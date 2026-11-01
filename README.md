@@ -5,6 +5,10 @@ CoderRunner is a high-performance, secure code and database execution engine des
 ## Supported Engines
 - **Programming Languages**: C, C++, Java, Python (3.8+), JavaScript (Node.js), TypeScript.
 - **Relational Databases**: PostgreSQL (16), MySQL (8.4), SQLite (3).
+- **Document Databases**: MongoDB (8.0).
+
+> [!IMPORTANT]
+> **Database Throughput & Scaling**: Database submissions (PostgreSQL, MySQL, MongoDB) are fundamentally limited to approximately **1 to 2 requests per second per node** regardless of host vCPU count. Because every database execution is fully sandboxed and consumes an isolated, ephemeral container boot, Docker daemon container lifecycles serialize container creation and destruction. The recommended architectural pattern for scaling database throughput is **horizontal worker scaling by adding `worker-db` nodes** (see [Capacity & Limits Reference](docs/limits.md)). In contrast, native code submissions run via Linux Isolate and scale linearly with vCPUs (sustaining ≥ 70 req/s on 8 vCPUs with ~20 ms latency).
 
 ## Architecture
 
