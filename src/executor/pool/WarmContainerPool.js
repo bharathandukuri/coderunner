@@ -97,6 +97,11 @@ export class WarmContainerPool {
     this.pendingRemovals = new Set();
     this.isShuttingDown = false;
 
+    const enableMongo = options.enableMongodb !== undefined
+      ? Boolean(options.enableMongodb)
+      : process.env.ENABLE_MONGODB === 'true';
+    this.enableMongodb = enableMongo;
+
     // Supported warm pool languages (database engines)
     this.pools = {
       8: {
@@ -133,7 +138,10 @@ export class WarmContainerPool {
         memoryLimit: 512 * 1024 * 1024,
         readySignal: 'CODERUNNER_DAEMON_READY',
       },
-      10: {
+    };
+
+    if (enableMongo) {
+      this.pools[10] = {
         available: [],
         waiters: [],
         activeBoots: 0,
@@ -153,8 +161,8 @@ export class WarmContainerPool {
           '-c',
           'mkdir -p /box/data && mongod --dbpath /box/data --wiredTigerCacheSizeGB 0.25 --bind_ip 127.0.0.1 --fork --logpath /box/mongo.log && touch /box/.ready && exec sleep infinity',
         ],
-      },
-    };
+      };
+    }
 
     // A4: Language pools opt-in via ENABLE_LANGUAGE_POOL (default false)
     const enableLanguagePool = options.enableLanguagePool !== undefined

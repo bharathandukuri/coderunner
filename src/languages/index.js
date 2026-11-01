@@ -31,7 +31,11 @@ export function getLanguageById(id) {
  * @returns {object[]} List of active languages
  */
 export function getActiveLanguages() {
-  return languagesList.filter(lang => !lang.is_archived);
+  const mongoEnabled = process.env.ENABLE_MONGODB === 'true';
+  return languagesList.filter(lang => {
+    if (lang.id === 10 && !mongoEnabled) return false;
+    return !lang.is_archived;
+  });
 }
 
 /**
@@ -39,7 +43,13 @@ export function getActiveLanguages() {
  * @returns {object[]} List of all languages
  */
 export function getAllLanguages() {
-  return languagesList;
+  const mongoEnabled = process.env.ENABLE_MONGODB === 'true';
+  return languagesList.map(lang => {
+    if (lang.id === 10 && !mongoEnabled) {
+      return { ...lang, is_archived: true };
+    }
+    return lang;
+  });
 }
 
 /**

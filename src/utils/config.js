@@ -82,6 +82,10 @@ const config = {
     languagePoolEnabled: process.env.ENABLE_LANGUAGE_POOL === 'true',
     maxConcurrentBoots: parseInt(process.env.WARM_POOL_MAX_CONCURRENT_BOOTS) || 3,
   },
+
+  mongodb: {
+    enabled: process.env.ENABLE_MONGODB === 'true',
+  },
 };
 
 /**

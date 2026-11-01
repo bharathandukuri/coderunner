@@ -133,6 +133,7 @@ PG_POOL=2
 MY_POOL=2
 MONGO_POOL=0
 MONITORING_ACTIVE=true
+ENABLE_MONGO=false
 
 if [ -f "$PROJECT_DIR/.env" ]; then
   W_CONCURRENCY=$(grep '^WORKER_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
@@ -143,6 +144,15 @@ if [ -f "$PROJECT_DIR/.env" ]; then
   if grep -q '^ENABLE_MONITORING=false' "$PROJECT_DIR/.env" 2>/dev/null; then
     MONITORING_ACTIVE=false
   fi
+  if grep -q '^ENABLE_MONGODB=true' "$PROJECT_DIR/.env" 2>/dev/null; then
+    ENABLE_MONGO=true
+  fi
+fi
+
+if [ "${ENABLE_MONGODB:-}" = "true" ]; then
+  ENABLE_MONGO=true
+elif [ "${ENABLE_MONGODB:-}" = "false" ]; then
+  ENABLE_MONGO=false
 fi
 
 # Fallback defaults for empty values
@@ -157,7 +167,7 @@ MONGO_POOL=${MONGO_POOL:-0}
 # OS reserve: 350MB
 # PostgreSQL: (pool_size + db_concurrency) * 75MB
 # MySQL: (pool_size + db_concurrency) * 280MB
-# MongoDB: (pool_size > 0 ? (pool_size + db_concurrency) * 250MB : 0)
+# MongoDB: only included when ENABLE_MONGODB=true
 # Worker Isolate: concurrency * 250MB
 BASE_MEM=360
 if [ "$MONITORING_ACTIVE" = "false" ]; then
@@ -167,8 +177,19 @@ OS_RESERVE=350
 PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
 MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
 MONGO_MEM=0
-if [ "$MONGO_POOL" -gt 0 ]; then
-  MONGO_MEM=$(( (MONGO_POOL + W_DB_CONCURRENCY) * 250 ))
+if [ "$ENABLE_MONGO" = "true" ]; then
+  MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_mb.txt"
+  if [ -f "$MONGO_MEASURED_FILE" ]; then
+    MONGO_PER_CONTAINER_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
+  else
+    MONGO_PER_CONTAINER_MB=250
+    echo -e "${YELLOW}  ⚠ Warning: MongoDB memory calculation is using an unmeasured estimate (${MONGO_PER_CONTAINER_MB}MB/container).${NC}"
+  fi
+  MONGO_P=${MONGO_POOL:-0}
+  if [ "$MONGO_P" -le 0 ]; then
+    MONGO_P=$W_CONCURRENCY
+  fi
+  MONGO_MEM=$(( (MONGO_P + W_DB_CONCURRENCY) * MONGO_PER_CONTAINER_MB ))
 fi
 ISO_MEM=$(( W_CONCURRENCY * 250 ))
 MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))
@@ -199,7 +220,7 @@ PORT_ISSUES=0
 
 # Verify ports 80 and 443 are not taken by competing services (other than docker/caddy)
 for port in 80 443; do
-  local_listeners=$(sudo ss -tulpn 2>/dev/null || ss -tulpn 2>/dev/null || true)
+  local_listeners=$(sudo -n ss -tulpn 2>/dev/null || ss -tulpn 2>/dev/null || true)
   if echo "$local_listeners" | grep -E ":$port\s" | grep -qvE 'docker|caddy'; then
     # If process name couldn't be resolved or unprivileged, check if Docker is publishing the port
     if ! docker ps --format '{{.Ports}}' 2>/dev/null | grep -q ":$port->"; then

@@ -10,6 +10,9 @@ const runSchema = Joi.object({
     if (!isValidLanguageId(value)) {
       return helpers.error('any.invalid');
     }
+    if (value === 10 && process.env.ENABLE_MONGODB !== 'true') {
+      return helpers.message({ custom: 'MongoDB (language_id: 10) is disabled. Set ENABLE_MONGODB=true to enable it.' });
+    }
     return value;
   }),
   stdin: Joi.string().allow('', null).default(''),
@@ -74,6 +77,9 @@ const multiFileRunSchema = Joi.object({
   language_id: Joi.number().integer().required().custom((value, helpers) => {
     if (!isValidLanguageId(value)) {
       return helpers.error('any.invalid');
+    }
+    if (value === 10 && process.env.ENABLE_MONGODB !== 'true') {
+      return helpers.message({ custom: 'MongoDB (language_id: 10) is disabled. Set ENABLE_MONGODB=true to enable it.' });
     }
     return value;
   }),

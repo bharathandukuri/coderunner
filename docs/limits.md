@@ -82,7 +82,7 @@ Where $\text{OvercommitFactor}$ is typically $2.0$ for compute-heavy workloads o
 ## 4. Hardware Sizing & Measured Capacity Tiers
 
 > [!IMPORTANT]
-> **Database Throughput Ceiling & Horizontal Scaling**: Database submissions (PostgreSQL, MySQL, MongoDB) are fundamentally limited to approximately **1 to 2 requests per second per node** regardless of host vCPU count. Because every database execution is fully sandboxed and consumes an isolated, ephemeral container boot, the Docker daemon serializes container destroy and create lifecycles under continuous load. **The only effective way to scale database throughput is horizontal worker scaling by adding `worker-db` nodes** (using `docker-compose.hub.yml`). In contrast, native code submissions run via Linux Isolate and scale linearly with host vCPUs (sustaining ≥ 70 req/s on 8 vCPUs with ~20 ms latency).
+> **Database Throughput Ceiling & Horizontal Scaling**: Database submissions are fundamentally limited to approximately **1 to 2 requests per second per node** (empirically measured for PostgreSQL 16 and MySQL 8.4; MongoDB 8.0 is not measured) regardless of host vCPU count. Because every database execution is fully sandboxed and consumes an isolated, ephemeral container boot, the Docker daemon serializes container destroy and create lifecycles under continuous load. **The only effective way to scale database throughput is horizontal worker scaling by adding `worker-db` nodes** (using `docker-compose.hub.yml`). In contrast, native code submissions run via Linux Isolate and scale linearly with host vCPUs (sustaining ≥ 70 req/s on 8 vCPUs with ~20 ms latency).
 
 The following table details recommended configurations and measured throughput limits.
 
@@ -154,6 +154,7 @@ The table below catalogs every environment variable controlling capacity, concur
 | `DOCKER_SOCKET`                    | `/var/run/docker.sock`               | Worker     | Path to Docker UNIX domain socket                                               |
 | `DOMAIN`                           | `localhost`                          | Compose    | Public domain name configured in Caddy for automatic TLS                        |
 | `ENABLE_LANGUAGE_POOL`             | `false`                              | Worker     | Enables warm container pooling for standard programming languages               |
+| `ENABLE_MONGODB`                   | `false`                              | Worker | Opt-in flag to enable MongoDB 8.0 support and container pool                    |
 | `GF_SERVER_ROOT_URL`               | `%(protocol)s://%(domain)s/grafana/` | Compose    | Grafana subpath routing configuration                                           |
 | `GRAFANA_CPUS`                     | `0.5`                                | Compose    | CPU ceiling for Grafana container                                               |
 | `GRAFANA_MEMORY`                   | `512M`                               | Compose    | Memory ceiling for Grafana container                                            |
@@ -171,7 +172,7 @@ The table below catalogs every environment variable controlling capacity, concur
 | `MAX_QUEUE_DEPTH`                  | `concurrency * 25`                   | API        | BullMQ backlog limit for code queue (submissions) before returning HTTP 503 backpressure |
 | `MAX_SOURCE_SIZE`                  | `65536`                              | Sandbox    | Maximum source code string size in bytes (64 KB)                                |
 | `MAX_WALL_TIME_LIMIT`              | `30`                                 | Sandbox    | Upper ceiling for client-requested wall-clock time limit (seconds)              |
-| `MONGODB_POOL_SIZE`                | `2`                                  | Worker     | Target idle warm container depth for MongoDB 8.0 database                       |
+| `MONGODB_POOL_SIZE`                | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for MongoDB 8.0 database (when ENABLE_MONGODB=true) |
 | `MYSQL_POOL_SIZE`                  | `2`                                  | Worker     | Target idle warm container depth for MySQL 8.4 database                         |
 | `NODE_ENV`                         | `development`                        | All        | Node.js environment mode (`production` or `development`)                        |
 | `NODE_EXPORTER_PIDS_LIMIT`         | `50`                                 | Compose    | Process count ceiling for node-exporter container                               |

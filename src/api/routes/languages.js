@@ -45,8 +45,9 @@ router.get('/:id', (req, res) => {
   }
 
   const language = getLanguageById(id);
+  const mongoEnabled = process.env.ENABLE_MONGODB === 'true';
 
-  if (!language) {
+  if (!language || (language.id === 10 && !mongoEnabled)) {
     return res.status(404).json({
       error: 'Not Found',
       message: `Language with ID ${id} not found`,

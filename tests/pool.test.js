@@ -1332,6 +1332,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
     const pool = new WarmContainerPool(mockDocker, {
       redis: mockRedis,
+      enableMongodb: true,
       postgresPoolSize: 1,
       mysqlPoolSize: 1,
       mongodbPoolSize: 2,
@@ -1499,6 +1500,108 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       config.queue.maxQueueDepth = savedMaxQueue;
       config.queue.maxDbQueueDepth = savedMaxDbQueue;
       setQueues(null, null);
+    }
+  });
+
+  it('34. MongoDB opt-in and safe defaults: pool creation, validation 422, languages visibility, and preflight arithmetic', async () => {
+    const { getActiveLanguages, getAllLanguages } = await import('../src/languages/index.js');
+    const { validateRun } = await import('../src/api/middleware/validation.js');
+    const { execSync } = await import('node:child_process');
+
+    const origEnv = process.env.ENABLE_MONGODB;
+
+    try {
+      // 1. Disabled by default
+      process.env.ENABLE_MONGODB = 'false';
+      const mockDocker = createMockDocker();
+      const mockRedis = createMockRedis();
+
+      const disabledPool = new WarmContainerPool(mockDocker, {
+        redis: mockRedis,
+        concurrency: 2,
+      });
+
+      assert.strictEqual(disabledPool.pools[10], undefined, 'No pool[10] must be created when disabled');
+      await disabledPool.shutdown();
+
+      // 2. Hidden in /languages and marked archived in /languages/all
+      const activeLangs = getActiveLanguages();
+      assert.strictEqual(activeLangs.some(l => l.id === 10), false, 'MongoDB must be hidden from getActiveLanguages');
+      const allLangs = getAllLanguages();
+      const mongoEntry = allLangs.find(l => l.id === 10);
+      assert.strictEqual(mongoEntry.is_archived, true, 'MongoDB must be marked archived in getAllLanguages when disabled');
+
+      // 3. Submissions with language_id 10 return 422
+      let statusCalled = null;
+      let jsonCalled = null;
+      const req = {
+        body: {
+          language_id: 10,
+          source_code: 'db.stats()',
+        },
+      };
+      const res = {
+        status: (code) => {
+          statusCalled = code;
+          return {
+            json: (body) => { jsonCalled = body; },
+          };
+        },
+      };
+      const next = () => {};
+
+      validateRun(req, res, next);
+      assert.strictEqual(statusCalled, 422, 'Must return HTTP 422 when language_id 10 is submitted while disabled');
+      assert.match(jsonCalled.message, /MongoDB \(language_id: 10\) is disabled/);
+
+      // 4. Enabled: creates pool with right size and validates MONGODB_POOL_SIZE >= 1
+      process.env.ENABLE_MONGODB = 'true';
+      const enabledPool = new WarmContainerPool(mockDocker, {
+        redis: mockRedis,
+        concurrency: 3,
+      });
+      assert.ok(enabledPool.pools[10], 'Pool[10] must be created when enabled');
+      assert.strictEqual(enabledPool.pools[10].targetPoolSize, 3, 'Default pool size must equal concurrency');
+      await enabledPool.shutdown();
+
+      // Validation of MONGODB_POOL_SIZE >= 1
+      assert.throws(() => {
+        new WarmContainerPool(mockDocker, {
+          redis: mockRedis,
+          enableMongodb: true,
+          mongodbPoolSize: 0,
+        });
+      }, /MONGODB_POOL_SIZE must be an integer >= 1/);
+
+      assert.throws(() => {
+        new WarmContainerPool(mockDocker, {
+          redis: mockRedis,
+          enableMongodb: true,
+          mongodbPoolSize: -2,
+        });
+      }, /MONGODB_POOL_SIZE must be an integer >= 1/);
+
+      // 5. Preflight arithmetic with and without Mongo
+      const preflightNoMongo = execSync(
+        'ENABLE_MONGODB=false WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 bash scripts/preflight.sh',
+        { encoding: 'utf-8' }
+      );
+      assert.match(preflightNoMongo, /min recommended: \d+MB/);
+      const matchNoMongo = preflightNoMongo.match(/min recommended: (\d+)MB/);
+      const memNoMongo = parseInt(matchNoMongo[1], 10);
+
+      const preflightWithMongo = execSync(
+        'ENABLE_MONGODB=true WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 MONGODB_POOL_SIZE=2 bash scripts/preflight.sh',
+        { encoding: 'utf-8' }
+      );
+      assert.match(preflightWithMongo, /min recommended: \d+MB/);
+      const matchWithMongo = preflightWithMongo.match(/min recommended: (\d+)MB/);
+      const memWithMongo = parseInt(matchWithMongo[1], 10);
+
+      // Sizing with Mongo enabled must be strictly greater than without Mongo
+      assert(memWithMongo > memNoMongo, `Memory with Mongo (${memWithMongo}MB) must exceed memory without Mongo (${memNoMongo}MB)`);
+    } finally {
+      process.env.ENABLE_MONGODB = origEnv;
     }
   });
 });
