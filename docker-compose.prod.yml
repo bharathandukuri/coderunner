@@ -246,6 +246,8 @@ services:
   alertmanager:
     profiles: ["monitoring"]
     image: prom/alertmanager:v0.27.0
+    environment:
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
     command:
       - '--config.file=/tmp/alertmanager.yml'
       - '--storage.path=/alertmanager'
@@ -253,10 +255,15 @@ services:
       - /bin/sh
       - -c
       - |
-        sed "s|ALERT_WEBHOOK_URL_PLACEHOLDER|$${ALERT_WEBHOOK_URL}|g" /etc/alertmanager/alertmanager.template.yml > /tmp/alertmanager.yml
+        if [ -n "$${ALERT_WEBHOOK_URL}" ]; then
+          sed "s|ALERT_WEBHOOK_URL_PLACEHOLDER|$${ALERT_WEBHOOK_URL}|g" /etc/alertmanager/alertmanager.template.yml > /tmp/alertmanager.yml
+        else
+          cp /etc/alertmanager/alertmanager.none.yml /tmp/alertmanager.yml
+        fi
         exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager
     volumes:
       - ./alertmanager.template.yml:/etc/alertmanager/alertmanager.template.yml:ro
+      - ./alertmanager.none.yml:/etc/alertmanager/alertmanager.none.yml:ro
       - alertmanager_data:/alertmanager
     restart: unless-stopped
     logging:

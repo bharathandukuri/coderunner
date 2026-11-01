@@ -178,6 +178,7 @@ cmd_up() {
   # Check ALERT_WEBHOOK_URL unless --no-alerts is specified
   if [ "$no_alerts" = true ]; then
     echo -e "${YELLOW}⚠ WARNING: Deploying with --no-alerts. Alert delivery is disabled; nobody will be notified of critical incidents!${NC}"
+    export ALERT_WEBHOOK_URL=""
   else
     if [ -z "$alert_webhook" ]; then
       echo -e "${RED}✗ ALERT_WEBHOOK_URL is empty in .env. A valid external webhook (Discord) is required for production alerts.${NC}" >&2
