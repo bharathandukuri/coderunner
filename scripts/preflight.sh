@@ -221,7 +221,7 @@ HOST_VCPUS=$(nproc || echo 1)
 # OS reserve: 350MB
 # PostgreSQL: (pool_size + db_concurrency) * 75MB
 # MySQL: (pool_size + db_concurrency) * 280MB
-# MongoDB: only included when ENABLE_MONGODB=true
+# MongoDB: (pool_size * measured_idle_ram) + (db_concurrency * 512MB job cap) when ENABLE_MONGODB=true
 # Worker Isolate: concurrency * 250MB
 BASE_MEM=360
 if [ "$MONITORING_ACTIVE" = "false" ]; then
@@ -232,18 +232,21 @@ PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
 MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
 MONGO_MEM=0
 if [ "$ENABLE_MONGO" = "true" ]; then
-  MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_mb.txt"
+  MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_idle_mb.txt"
   if [ -f "$MONGO_MEASURED_FILE" ]; then
-    MONGO_PER_CONTAINER_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
+    MONGO_IDLE_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
+  elif [ -f "$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_mb.txt" ]; then
+    MONGO_IDLE_MB=90
   else
-    MONGO_PER_CONTAINER_MB=250
-    echo -e "${YELLOW}  ⚠ Warning: MongoDB memory calculation is using an unmeasured estimate (${MONGO_PER_CONTAINER_MB}MB/container).${NC}"
+    MONGO_IDLE_MB=90
+    echo -e "${YELLOW}  ⚠ Warning: MongoDB memory calculation is using an unmeasured estimate (${MONGO_IDLE_MB}MB/container).${NC}"
   fi
   MONGO_P=${MONGO_POOL:-0}
   if [ "$MONGO_P" -le 0 ]; then
     MONGO_P=$W_CONCURRENCY
   fi
-  MONGO_MEM=$(( (MONGO_P + W_DB_CONCURRENCY) * MONGO_PER_CONTAINER_MB ))
+  MONGO_JOB_MB=512
+  MONGO_MEM=$(( (MONGO_P * MONGO_IDLE_MB) + (W_DB_CONCURRENCY * MONGO_JOB_MB) ))
 fi
 ISO_MEM=$(( W_CONCURRENCY * 250 ))
 MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))

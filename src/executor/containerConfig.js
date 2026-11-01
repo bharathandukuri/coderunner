@@ -81,7 +81,7 @@ export function buildContainerConfig({
   const tmpfs = isDaemon ? {
     '/box': 'rw,exec,nosuid,size=256m,mode=1777',
     '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
-    '/data/db': 'rw,size=16m',
+    '/data/db': 'rw,noexec,nosuid,size=205m,mode=1777',
     '/data/configdb': 'rw,size=16m',
   } : {
     '/box': `rw,exec,nosuid,size=${boxSize}m,mode=1777`,

@@ -19,8 +19,10 @@ This directory contains empirical footprint measurements for MongoDB 8.0 LTS (`m
 | **Boot Time (Max)** | **1,600.72 ms** (~1.60 s) | Ephemeral container boot to `/box/.ready` signal |
 | **Idle RAM** | **90.21 MiB** | Steady-state standby with mongod running |
 | **Trivial Query RAM** | **91.70 MiB** | `db.stats()` query executed via mongosh |
-| **Active Load RAM (10k docs)** | **96.29 MiB** | 10,000 JSON documents inserted into collection |
+| **Active Load RAM (10k docs)** | **96.29 MiB** | 10,000 JSON documents inserted into collection (~97 MiB, idle plus light load) |
 
 ## Constants & Formulas
-Based on the peak working RAM of **96.29 MiB**, the memory sizing formula in `docs/limits.md` and `scripts/preflight.sh` allocates:
-$$\text{RAM}_{\text{pool},\text{mongo}} = 97\text{ MiB per container}$$
+Based on the measured idle baseline of **90.21 MiB** and container memory cap of **512 MB**, the memory sizing formula in `docs/limits.md` and `scripts/preflight.sh` allocates:
+- $\text{RAM}_{\text{pool},\text{mongo}} = 90\text{ MiB}$ per idle warm pool container
+- $\text{RAM}_{\text{job},\text{mongo}} = 512\text{ MiB}$ per concurrent database worker slot
+$$\text{RAM}_{\text{mongo}} = (\text{PoolSize}_{\text{mongo}} \times 90\text{ MiB}) + (\text{Workers}_{\text{db}} \times \text{Concurrency}_{\text{db}} \times 512\text{ MiB})$$

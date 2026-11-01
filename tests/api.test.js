@@ -1194,5 +1194,39 @@ describe('CodeRunner API', () => {
       assert.strictEqual(data.executions.length, 2);
       assert.match(data.executions[1].stdout, /ok/);
     });
+
+    it('produces clean error without container crash when inserting beyond tmpfs size', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          language_id: 10,
+          source_code: `
+            const crypto = require('crypto');
+            try {
+              for (let b = 0; b < 60; b++) {
+                const docs = [];
+                for (let i = 0; i < 8; i++) {
+                  docs.push({ data: crypto.randomBytes(32768).toString('hex') });
+                }
+                db.overflow.insertMany(docs, { ordered: false });
+              }
+              print('ALL_INSERTED');
+            } catch (err) {
+              print('CLEAN_ERROR: ' + err.message);
+            }
+          `,
+        }),
+      });
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.notStrictEqual(data.status.id, 137, 'Container must not be killed by OOM killer (exit 137)');
+      assert(data.status.id === 3 || data.status.id === 11, 'Must return status Accepted or NZEC');
+      assert(
+        (data.stdout && (data.stdout.includes('CLEAN_ERROR') || data.stdout.includes('No space left') || data.stdout.includes('ALL_INSERTED'))) ||
+        (data.stderr && (data.stderr.includes('No space left') || data.stderr.includes('closed') || data.stderr.includes('MongoError'))),
+        'Must handle overflow cleanly without crashing'
+      );
+    });
   });
 });

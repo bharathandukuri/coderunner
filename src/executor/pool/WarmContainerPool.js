@@ -160,7 +160,7 @@ export class WarmContainerPool {
         cmd: [
           'bash',
           '-c',
-          'mkdir -p /box/data && mongod --dbpath /box/data --wiredTigerCacheSizeGB 0.25 --setParameter diagnosticDataCollectionEnabled=false --bind_ip 127.0.0.1 --fork --logpath /box/mongo.log && touch /box/.ready && exec sleep infinity',
+          'mkdir -p /data/db && mongod --dbpath /data/db --wiredTigerCacheSizeGB 0.25 --setParameter diagnosticDataCollectionEnabled=false --bind_ip 127.0.0.1 --fork --logpath /box/mongo.log && touch /box/.ready && exec sleep infinity',
         ],
       };
     }

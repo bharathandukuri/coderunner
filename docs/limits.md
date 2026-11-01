@@ -50,7 +50,7 @@ The formulas below are derived directly from empirical `docker stats` measuremen
 | **Host OS Baseline**        | ~350 MiB | ~350 MiB          | Kernel, systemd, journald, SSH, Docker daemon                                                                                    |
 | **PostgreSQL 16 Container** | ~57 MiB  | ~75 MiB           | Single isolated warm PostgreSQL instance                                                                                         |
 | **MySQL 8.4 Container**     | ~243 MiB | ~280 MiB          | Single isolated warm MySQL instance with Performance Schema off                                                                  |
-| **MongoDB 8.0 Container**   | ~90 MiB  | ~97 MiB           | Single isolated warm MongoDB instance with WiredTiger cache 0.25GB (`coderunner/mongodb:8.0`, ~694 MB multi-stage build via `scripts/build-images.sh`) |
+| **MongoDB 8.0 Container**   | ~90 MiB (idle) | ~97 MiB (idle plus light load) | Single isolated warm MongoDB instance with WiredTiger cache 0.25 GB (256 MB) and /data/db tmpfs 205 MB (`coderunner/mongodb:8.0`, ~694 MB multi-stage build via `scripts/build-images.sh`). Concurrently running jobs are capped at 512 MB. |
 | **Isolate Code Job**        | 0 MiB    | ~15–30 MiB        | Process in Linux namespaces (allocated on demand, released immediately)                                                          |
 | **Docker Code Container**   | ~25 MiB  | ~45–128 MiB       | Cold or pooled language runner container                                                                                         |
 
@@ -66,7 +66,7 @@ Where:
 - $\text{RAM}_{\text{job}} = 30\text{ MiB}$ for Isolate workers, or $128\text{ MiB}$ for Docker code workers.
 - $\text{RAM}_{\text{pool},\text{pg}} = 75\text{ MiB}$ per PostgreSQL container.
 - $\text{RAM}_{\text{pool},\text{my}} = 280\text{ MiB}$ per MySQL container.
-- $\text{RAM}_{\text{pool},\text{mongo}} = 97\text{ MiB}$ per MongoDB container (when `ENABLE_MONGODB=true`).
+- $\text{RAM}_{\text{mongo}} = (\text{PoolSize}_{\text{mongo}} \times 90\text{ MiB}) + (\text{Workers}_{\text{db}} \times \text{Concurrency}_{\text{db}} \times 512\text{ MiB})$ when `ENABLE_MONGODB=true` (using measured idle RAM of $90\text{ MiB}$ for warm idle containers and the $512\text{ MiB}$ container memory cap for active running jobs), or $0$ when disabled.
 
 #### Minimum Required vCPU
 
@@ -85,6 +85,19 @@ Where $\text{OvercommitFactor}$ is typically $2.0$ for compute-heavy workloads o
 
 > [!IMPORTANT]
 > **Database Throughput Ceiling & Horizontal Scaling**: Database submissions are fundamentally limited to approximately **1 to 2 requests per second per node** (empirically measured for PostgreSQL 16 and MySQL 8.4; MongoDB 8.0 is not measured) regardless of host vCPU count. Because every database execution is fully sandboxed and consumes an isolated, ephemeral container boot, the Docker daemon serializes container destroy and create lifecycles under continuous load. **The only effective way to scale database throughput is horizontal worker scaling by adding `worker-db` nodes** (using `docker-compose.hub.yml`). In contrast, native code submissions run via Linux Isolate and scale linearly with host vCPUs (sustaining ≥ 70 req/s on 8 vCPUs with ~20 ms latency).
+
+> [!NOTE]
+> **MongoDB Throughput & Boot Sizing**: MongoDB 8.0 container boot time is approximately **1.6 s per container** (empirically measured over 10 samples: min 1.50 s, p50 1.57 s, max 1.60 s). Because of this container boot overhead, sustained throughput per node is lower than PostgreSQL/MySQL, and MongoDB sustained throughput remains classified as **not measured**. The 1 to 2 req/s ceiling remains labeled for PostgreSQL and MySQL only.
+
+### MongoDB Memory Sizing & tmpfs Integrity
+
+To ensure absolute container stability under arbitrary user script execution:
+- **Container Memory Cap**: 512 MB (`Memory: 512 * 1024 * 1024`).
+- **WiredTiger Cache**: `--wiredTigerCacheSizeGB 0.25` (256 MB internal dirty/clean page cache; MongoDB 8.0 enforces $\ge 0.25\text{ GB}$).
+- **Database Storage tmpfs**: `/data/db` mounted with `size=205m` (205 MB ephemeral in-memory tmpfs accommodating WiredTiger's mandatory $2 \times 100\text{ MB}$ pre-allocated journal files plus catalog metadata).
+- **Auxiliary tmpfs Mounts**: `/box` (256 MB), `/tmp` (64 MB), `/data/configdb` (16 MB).
+- **Total Combined Allocation**: $256\text{ MB} (\text{cache}) + 205\text{ MB} (\text{tmpfs}) = 461\text{ MB} \le 512\text{ MB}$.
+- **Graceful Failure Guarantee**: If an untrusted query attempts to write excessive data into MongoDB, the `/data/db` tmpfs fills at 205 MB and returns a clean write error (`WiredTiger error: No space left on device` or socket termination) rather than exceeding the 512 MB cgroup memory cap and triggering an uncatchable container crash via Linux OOM killer (exit 137).
 
 The following table details recommended configurations and measured throughput limits.
 

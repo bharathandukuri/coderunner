@@ -197,6 +197,17 @@ describe('DockerExecutor and containerConfig Unit Tests (Section C)', () => {
 
     await pool.shutdown();
   });
+
+  it('C5. Container tmpfs configuration for database daemons is consistent with 512MB cap', () => {
+    const configDaemon = buildContainerConfig({
+      language: { id: 10, name: 'MongoDB', is_daemon: true, category: 'database' },
+      instanceId: 'test-inst',
+      isDaemon: true,
+      isPool: true,
+    });
+    assert.strictEqual(configDaemon.HostConfig.Tmpfs['/data/db'], 'rw,noexec,nosuid,size=205m,mode=1777');
+    assert.strictEqual(configDaemon.HostConfig.Memory, 512000 * 1024);
+  });
 });
 
 describe('Single Definition of Database Language (Item 2)', () => {
