@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-
-# CodeRunner - Automated Isolate Sandbox Installer
-# Builds and configures isolate with cgroups v2 support on Ubuntu/Debian hosts.
+# scripts/install-isolate.sh - Builds and installs isolate sandbox with cgroups v2 on host Linux systems
 
 set -euo pipefail
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: scripts/install-isolate.sh"
+  echo "Builds and configures isolate sandbox with cgroups v2 support on Linux hosts."
+  exit 0
+fi
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
+# scripts/verify-docker-proxy.sh - Verifies Docker socket proxy container permissions and isolation
+
 set -euo pipefail
 
-# CodeRunner - Docker Socket Proxy Verification Script
-# Verifies container create, start, exec, and delete (with v=true) through docker-socket-proxy.
-# Also verifies that denied API sections (volumes, networks, secrets) return 403 Forbidden.
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: scripts/verify-docker-proxy.sh"
+  echo "Verifies container lifecycle (create, start, exec, delete) and security boundaries via docker-socket-proxy."
+  exit 0
+fi
 
 PROXY_HOST="${DOCKER_HOST:-${PROXY_URL:-http://127.0.0.1:2375}}"
 # Normalize tcp:// to http://

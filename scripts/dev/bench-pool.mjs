@@ -1,12 +1,30 @@
 #!/usr/bin/env node
+/**
+ * scripts/dev/bench-pool.mjs - Benchmarks cold vs warm container pool acquisition and execution
+ */
+
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+  console.log(`
+Usage: node scripts/dev/bench-pool.mjs [options]
+
+Benchmarks container acquisition and cold vs warm execution timings across supported runtimes.
+Environment variables:
+  BENCH_ITERATIONS     Number of iterations to run (default: 5)
+  API_URL              API base URL for e2e tests (default: http://localhost:3000)
+  AUTH_TOKEN           Auth token for API requests (default: dev-token)
+  DOCKER_SOCKET        Path to Docker socket (default: /var/run/docker.sock)
+`);
+  process.exit(0);
+}
+
 import Docker from 'dockerode';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
-import { getLanguageById } from '../src/languages/index.js';
+import { WarmContainerPool } from '../../src/executor/pool/WarmContainerPool.js';
+import { getLanguageById } from '../../src/languages/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

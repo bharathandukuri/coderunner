@@ -1,17 +1,13 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# scripts/dev/setup.sh - Local development environment setup for CodeRunner
 
-# CodeRunner Setup Script
-# Detects system capabilities and sets up the appropriate execution environment.
-#
-# Automated checks performed:
-#   • Docker installed and running
-#   • cgroups v2 (required for isolate)
-#   • isolate binary (optional; enables Isolate worker mode)
-#   • gVisor runsc (optional; enables DOCKER_RUNTIME=runsc hardening)
-#   • Patches .env with recommended executor settings
-#   • Builds all Docker images
+set -euo pipefail
 
-set -e
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: scripts/dev/setup.sh"
+  echo "Sets up local development environment: checks Docker, cgroups v2, isolate, creates .env, and builds images."
+  exit 0
+fi
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

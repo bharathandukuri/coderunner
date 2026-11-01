@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-
-# CodeRunner - Automated gVisor (runsc) Installer
-# Installs gVisor via apt repository (Debian/Ubuntu) or binary archive, and configures Docker.
+# scripts/install-gvisor.sh - Installs gVisor (runsc) runtime and configures Docker daemon
 
 set -euo pipefail
+
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "Usage: scripts/install-gvisor.sh"
+  echo "Installs gVisor (runsc) runtime and configures Docker daemon on Linux hosts."
+  exit 0
+fi
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'

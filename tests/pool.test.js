@@ -1071,7 +1071,9 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const { fileURLToPath } = await import('url');
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const benchScriptPath = path.join(__dirname, '../scripts/bench-pool.mjs');
+    const benchScriptPath = fs.existsSync(path.join(__dirname, '../scripts/dev/bench-pool.mjs'))
+      ? path.join(__dirname, '../scripts/dev/bench-pool.mjs')
+      : path.join(__dirname, '../scripts/bench-pool.mjs');
     const content = fs.readFileSync(benchScriptPath, 'utf8');
 
     const lines = content.split('\n');
