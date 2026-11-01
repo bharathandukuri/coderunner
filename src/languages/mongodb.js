@@ -10,6 +10,7 @@ export default {
   compile_cmd: null,
   run_cmd: 'HOME=/tmp mongosh --norc --quiet /box/query.js',
   image: 'coderunner/mongodb:8.0',
+  pids_limit: 128,
   default_time_limit: 5,
   max_time_limit: 30,
   min_memory: 0,

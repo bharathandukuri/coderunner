@@ -154,7 +154,7 @@ export class WarmContainerPool {
         name: 'mongodb',
         langId: 10,
         isDaemon: true,
-        pidsLimit: 64,
+        pidsLimit: 128,
         memoryLimit: 512 * 1024 * 1024,
         readySignal: 'CODERUNNER_DAEMON_READY',
         cmd: [

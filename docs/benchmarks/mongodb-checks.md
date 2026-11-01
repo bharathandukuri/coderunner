@@ -1,17 +1,27 @@
 # MongoDB Security & Behavioral Verification
 
 - **Date**: 2026-11-01
-- **Target Engine**: MongoDB 8.0 LTS (`mongo:8.0`)
+- **Target Engine**: MongoDB 8.0 LTS (`coderunner/mongodb:8.0`)
 - **Execution Mode**: Ephemeral Container Sandbox via `mongod` daemon + `mongosh` CLI
-- **Commit**: `cf26e18`
+- **Commit**: `9517ecf` (updated in `d26aac0`)
 
 ---
 
-## 1. Escape Attempt Analysis
+## 1. Process Limits & Thread Usage
+
+Empirical measurement of `pids.current` (cgroup process count) on the running container:
+- **Idle Warm Container (`mongod` daemon running)**: **49 pids**
+- **Active Query Execution (`mongod` + `mongosh`)**: **~50–65 pids** (mongod threadpool + Node.js libuv worker threads)
+- **Previous `pidsLimit: 64` Issue**: Because `mongod` consumed 49 threads at idle, `mongosh` quickly hit the 64-process ceiling upon spawning worker threads or subprocesses, failing with `spawnSync /bin/sh EAGAIN`.
+- **Target `pidsLimit`**: Raised to **128**, providing safe operational headroom for mongod background tasks and mongosh execution while strictly containing fork bombs.
+
+---
+
+## 2. Escape Attempt Analysis
 
 All tests executed inside the isolated container sandbox:
 
-### 1.1 `require('child_process').execSync('id')`
+### 2.1 `require('child_process').execSync('id')`
 - **Script**:
   ```javascript
   try {
@@ -23,11 +33,17 @@ All tests executed inside the isolated container sandbox:
   ```
 - **Output**:
   ```text
-  EXEC_BLOCKED: spawnSync /bin/sh EAGAIN
+  EXEC_SUCCESS: uid=1001(runner) gid=1001(runner) groups=1001(runner)
   ```
-- **Analysis**: Blocked by container process limit (`pidsLimit: 64`) preventing subprocess creation. Furthermore, `CapDrop: ALL` and `no-new-privileges: true` disallow privilege escalation.
+- **Analysis**: User JavaScript in `mongosh` can spawn subprocesses inside the container as the unprivileged user `runner` (`uid=1001`). Subprocesses execute within the exact same hardened container sandbox posture as Python or Node.js submissions in CodeRunner:
+  - Network is completely disabled (`NetworkMode: none`).
+  - All Linux capabilities are dropped (`CapDrop: ALL`).
+  - Privilege escalation is disabled (`no-new-privileges: true`).
+  - Root filesystem is mounted read-only (`ReadonlyRootfs: true`).
+  - Container process limit is capped (`pidsLimit: 128`).
+  *(Note: The previous report that `CapDrop` or `no-new-privileges` prevented subprocess creation was incorrect; subprocess creation was previously blocked solely by exhausting the 64-process cap).*
 
-### 1.2 `require('fs').readFileSync('/etc/passwd')`
+### 2.2 `require('fs').readFileSync('/etc/passwd')`
 - **Script**:
   ```javascript
   try {
@@ -46,7 +62,7 @@ All tests executed inside the isolated container sandbox:
   ```
 - **Analysis**: Succeeds in reading `/etc/passwd` inside the unprivileged container rootfs. Behavior is identical to Python (`open('/etc/passwd').read()`) and Node.js submissions in Judge0 / CodeRunner. No host files are accessible because rootfs is isolated and host filesystem is unmounted.
 
-### 1.3 `load('/etc/passwd')`
+### 2.3 `load('/etc/passwd')`
 - **Script**:
   ```javascript
   try {
@@ -64,7 +80,7 @@ All tests executed inside the isolated container sandbox:
   ```
 - **Analysis**: Blocked by JavaScript parser syntax error.
 
-### 1.4 `process.env`
+### 2.4 `process.env`
 - **Script**:
   ```javascript
   print("ENV_KEYS: " + Object.keys(process.env).sort().join(", "));
@@ -75,15 +91,17 @@ All tests executed inside the isolated container sandbox:
   ```
 - **Analysis**: Exposes standard container environment variables only. No API tokens, Redis passwords, or host secrets exist within the execution container environment.
 
-### 1.5 `db.adminCommand({shutdown: 1})`
-- **Analysis**: Blocked prior to execution by CodeRunner's static analyzer (`src/security/codeAnalyzer.js`) with HTTP 422: `forbidden language construct: mongodb shutdown command`.
+### 2.5 `db.adminCommand({shutdown: 1})`
+- **Analysis**: Filtered prior to execution by CodeRunner's static analyzer (`src/security/codeAnalyzer.js`) with HTTP 422: `forbidden language construct: mongodb shutdown command`.
+- **Security Boundary Note**: Static AST / regex checks for shutdown commands are convenience guardrails, not an absolute security boundary, because dynamic property access (e.g. `db['admin' + 'Command'] ({ shutdown: 1 })`) or subprocess calls via `child_process` can bypass pattern matching. Defense-in-depth relies on ephemeral container destruction and recreation after execution.
 
-### 1.6 `db.getSiblingDB('admin').shutdownServer()`
-- **Analysis**: Blocked prior to execution by CodeRunner's static analyzer (`src/security/codeAnalyzer.js`) with HTTP 422: `forbidden language construct: mongodb shutdown server`.
+### 2.6 `db.getSiblingDB('admin').shutdownServer()`
+- **Analysis**: Filtered prior to execution by CodeRunner's static analyzer (`src/security/codeAnalyzer.js`) with HTTP 422: `forbidden language construct: mongodb shutdown server`.
+- **Security Boundary Note**: Like `adminCommand`, this AST check is a convenience guardrail; dynamic property access (e.g. `db['shutdown' + 'Server']()`) bypasses static detection. Container isolation and automatic teardown provide the true isolation boundary.
 
 ---
 
-## 2. Behavioral Checks
+## 3. Behavioral Checks
 
 | Test Case | Expected Behavior | Observed Result | Pass/Fail |
 |---|---|---|---|
@@ -95,7 +113,7 @@ All tests executed inside the isolated container sandbox:
 
 ---
 
-## 3. Container Hardening Audit
+## 4. Container Hardening Audit
 
 Inspection of running container via `docker inspect`:
 ```json
@@ -105,7 +123,7 @@ Inspection of running container via `docker inspect`:
     "ALL"
   ],
   "ReadonlyRootfs": true,
-  "PidsLimit": 64,
+  "PidsLimit": 128,
   "Memory": 536870912,
   "Tmpfs": {
     "/box": "rw,exec,nosuid,size=64m",
