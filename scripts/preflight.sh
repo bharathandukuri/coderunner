@@ -10,6 +10,7 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 AUTO_INSTALL_ISOLATE=false
+SIZING_ONLY=false
 
 show_help() {
   cat << 'EOF'
@@ -25,6 +26,7 @@ Performs pre-deployment host system checks for CodeRunner:
   - DNS resolution for configured DOMAIN
 
 Options:
+  --sizing-only       Only calculate and print the sizing requirements (hermetic, no host checks)
   --install-isolate   Automatically run scripts/install-isolate.sh if isolate is missing
   --help, -h          Show this help message and exit
 EOF
@@ -32,6 +34,9 @@ EOF
 
 for arg in "$@"; do
   case "$arg" in
+    --sizing-only)
+      SIZING_ONLY=true
+      ;;
     --install-isolate)
       AUTO_INSTALL_ISOLATE=true
       ;;
@@ -85,6 +90,43 @@ W_DB_CONCURRENCY=${W_DB_CONCURRENCY:-2}
 PG_POOL=${PG_POOL:-2}
 MY_POOL=${MY_POOL:-2}
 MONGO_POOL=${MONGO_POOL:-0}
+
+# Base services memory
+BASE_MEM=360
+if [ "$MONITORING_ACTIVE" = "false" ]; then
+  BASE_MEM=150
+fi
+
+if [ "$SIZING_ONLY" = true ]; then
+  TOTAL_MEM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo 8192)
+  HOST_VCPUS=$(nproc 2>/dev/null || echo 4)
+  OS_RESERVE=350
+  PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
+  MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
+  MONGO_MEM=0
+  if [ "$ENABLE_MONGO" = "true" ]; then
+    MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_mb.txt"
+    if [ -f "$MONGO_MEASURED_FILE" ]; then
+      MONGO_PER_CONTAINER_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
+    else
+      MONGO_PER_CONTAINER_MB=250
+    fi
+    MONGO_MEM=$(( (MONGO_POOL + W_DB_CONCURRENCY) * MONGO_PER_CONTAINER_MB ))
+  fi
+  ISOLATE_MEM=$(( W_CONCURRENCY * 250 ))
+
+  MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISOLATE_MEM ))
+  MIN_VCPUS_RECOMMENDED=2
+  if [ "$W_CONCURRENCY" -ge 4 ]; then
+    MIN_VCPUS_RECOMMENDED=4
+  fi
+  if [ "$W_CONCURRENCY" -ge 8 ]; then
+    MIN_VCPUS_RECOMMENDED=8
+  fi
+
+  echo "Host RAM and CPU Sizing (docs/limits.md formula)... ✓ RAM: ${TOTAL_MEM_MB:-8192}MB total (min recommended: ${MEM_MIN_RECOMMENDED}MB) | vCPUs: ${HOST_VCPUS:-4} (min: ${MIN_VCPUS_RECOMMENDED})"
+  exit 0
+fi
 
 echo "================================================="
 echo "  CodeRunner Production Preflight Verification"

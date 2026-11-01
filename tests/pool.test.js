@@ -1584,9 +1584,9 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
         });
       }, /MONGODB_POOL_SIZE must be an integer >= 1/);
 
-      // 5. Preflight arithmetic with and without Mongo
+      // 5. Preflight arithmetic with and without Mongo (hermetic via --sizing-only)
       const preflightNoMongo = execSync(
-        'ENABLE_MONGODB=false WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 bash scripts/preflight.sh',
+        'ENABLE_MONGODB=false WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 bash scripts/preflight.sh --sizing-only',
         { encoding: 'utf-8' }
       );
       assert.match(preflightNoMongo, /min recommended: \d+MB/);
@@ -1594,7 +1594,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       const memNoMongo = parseInt(matchNoMongo[1], 10);
 
       const preflightWithMongo = execSync(
-        'ENABLE_MONGODB=true WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 MONGODB_POOL_SIZE=2 bash scripts/preflight.sh',
+        'ENABLE_MONGODB=true WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 MONGODB_POOL_SIZE=2 bash scripts/preflight.sh --sizing-only',
         { encoding: 'utf-8' }
       );
       assert.match(preflightWithMongo, /min recommended: \d+MB/);
