@@ -1100,4 +1100,93 @@ describe('CodeRunner API', () => {
       assert(data.memory);
     });
   });
+
+  describe('MongoDB Execution (Language ID: 10)', { skip: process.env.ENABLE_MONGODB !== 'true' }, () => {
+    it('executes single-file MongoDB query (insert then find)', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          language_id: 10,
+          source_code: `
+            db.items.insertOne({ name: 'apple', price: 1.5 });
+            db.items.insertOne({ name: 'banana', price: 0.75 });
+            printjson(db.items.find({}, { _id: 0 }).sort({ name: 1 }).toArray());
+          `,
+        }),
+      });
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.strictEqual(data.status.id, 3); // Accepted
+      assert.match(data.stdout, /apple/);
+      assert.match(data.stdout, /banana/);
+    });
+
+    it('rejects forbidden administrative command (shutdownServer)', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          language_id: 10,
+          source_code: `db.getSiblingDB('admin').shutdownServer();`,
+        }),
+      });
+      assert.strictEqual(res.status, 422);
+      const data = await res.json();
+      assert.match(data.message, /forbidden language construct/i);
+    });
+
+    it('enforces time limit for infinite loop (TLE)', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          language_id: 10,
+          wall_time_limit: 2,
+          source_code: `while(true) {}`,
+        }),
+      });
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.strictEqual(data.status.id, 5); // TLE
+    });
+
+    it('returns runtime error for invalid script', async () => {
+      const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          language_id: 10,
+          source_code: `invalid javascript syntax !!!`,
+        }),
+      });
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.strictEqual(data.status.id, 11); // NZEC
+    });
+
+    it('supports multi-file project with state across files', async () => {
+      const res = await fetch(`${BASE_URL}/multi/submissions?wait=true`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          language_id: 10,
+          files: [
+            {
+              name: 'seed.js',
+              content: `db.coll.insertOne({ status: 'ok' });`,
+            },
+            {
+              name: 'query.js',
+              content: `printjson(db.coll.findOne({}, { _id: 0 }));`,
+            },
+          ],
+        }),
+      });
+      assert.strictEqual(res.status, 201);
+      const data = await res.json();
+      assert.strictEqual(data.status.id, 3); // Accepted
+      assert.match(data.stdout, /ok/);
+    });
+  });
 });

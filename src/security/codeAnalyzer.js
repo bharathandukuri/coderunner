@@ -117,7 +117,7 @@ const MYSQL_PATTERNS = [
 // ── MongoDB patterns (language ID 10) ───────────────────────────────────────
 const MONGO_PATTERNS = [
   { pattern: /shutdownServer\s*\(/i, reason: 'mongodb shutdown server' },
-  { pattern: /runCommand\s*\(\s*\{\s*["']?shutdown/i, reason: 'mongodb shutdown command' },
+  { pattern: /(?:runCommand|adminCommand)\s*\(\s*\{\s*["']?shutdown/i, reason: 'mongodb shutdown command' },
   { pattern: /fsyncLock\s*\(/i, reason: 'mongodb lock database' },
 ];
 
