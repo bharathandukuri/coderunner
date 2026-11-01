@@ -1,0 +1,69 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mysql | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 5 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 60/60 ok | p50: 144ms | p95: 158ms | p99: 185ms\n• Testing 2 RPS for 60s... ✗ ABORT | p95 latency (15186ms) exceeded threshold (2500ms) | p50: 3558ms | p95: 15186ms | errors: 2.5%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mysql\n  Max Passing RPS:        1\n  p50 at Max RPS:         144 ms\n  p95 at Max RPS:         158 ms\n  p99 at Max RPS:         185 ms\n  First Failure Mode:     p95 latency (15186ms) exceeded threshold (2500ms)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mysql\",\n    \"maxPassingRps\": 1,\n    \"passingStats\": {\n      \"min\": 127,\n      \"p50\": 144,\n      \"p95\": 158,\n      \"p99\": 185,\n      \"max\": 185,\n      \"avg\": 143\n    },\n    \"firstFailureMode\": \"p95 latency (15186ms) exceeded threshold (2500ms)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 60,\n        \"successes\": 60,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 127,\n          \"p50\": 144,\n          \"p95\": 158,\n          \"p99\": 185,\n          \"max\": 185,\n          \"avg\": 143\n        },\n        \"health\": {\n          \"memAvailPct\": 62.861182040027686,\n          \"load1\": 1.89,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 117,\n        \"failures\": 3,\n        \"errorRate\": 0.025,\n        \"stats\": {\n          \"min\": 130,\n          \"p50\": 3558,\n          \"p95\": 15186,\n          \"p99\": 15941,\n          \"max\": 16328,\n          \"avg\": 5789\n        },\n        \"health\": {\n          \"memAvailPct\": 77.49971346958571,\n          \"load1\": 3.4,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"p95 latency (15186ms) exceeded threshold (2500ms)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mysql",
+    "maxPassingRps": 1,
+    "passingStats": {
+      "min": 127,
+      "p50": 144,
+      "p95": 158,
+      "p99": 185,
+      "max": 185,
+      "avg": 143
+    },
+    "firstFailureMode": "p95 latency (15186ms) exceeded threshold (2500ms)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 60,
+        "successes": 60,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 127,
+          "p50": 144,
+          "p95": 158,
+          "p99": 185,
+          "max": 185,
+          "avg": 143
+        },
+        "health": {
+          "memAvailPct": 62.861182040027686,
+          "load1": 1.89,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 117,
+        "failures": 3,
+        "errorRate": 0.025,
+        "stats": {
+          "min": 130,
+          "p50": 3558,
+          "p95": 15186,
+          "p99": 15941,
+          "max": 16328,
+          "avg": 5789
+        },
+        "health": {
+          "memAvailPct": 77.49971346958571,
+          "load1": 3.4,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "p95 latency (15186ms) exceeded threshold (2500ms)"
+        ]
+      }
+    ]
+  }
+}

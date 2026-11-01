@@ -1,0 +1,235 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: python | Base URL: http://127.0.0.1:3000\n  RPS Range: 10 -> 50 (step: 5, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 1000ms, error rate > 5%\n=================================================\n\n• Testing 10 RPS for 60s... ✓ PASS | 600/600 ok | p50: 19ms | p95: 21ms | p99: 27ms\n• Testing 15 RPS for 60s... ✓ PASS | 900/900 ok | p50: 19ms | p95: 21ms | p99: 24ms\n• Testing 20 RPS for 60s... ✓ PASS | 1200/1200 ok | p50: 19ms | p95: 21ms | p99: 25ms\n• Testing 25 RPS for 60s... ✓ PASS | 1500/1500 ok | p50: 19ms | p95: 21ms | p99: 68ms\n• Testing 30 RPS for 60s... ✓ PASS | 1801/1801 ok | p50: 19ms | p95: 21ms | p99: 48ms\n• Testing 35 RPS for 60s... ✓ PASS | 2100/2100 ok | p50: 20ms | p95: 28ms | p99: 364ms\n• Testing 40 RPS for 60s... ✓ PASS | 2400/2400 ok | p50: 19ms | p95: 25ms | p99: 57ms\n• Testing 45 RPS for 60s... ✓ PASS | 2701/2701 ok | p50: 20ms | p95: 28ms | p99: 145ms\n• Testing 50 RPS for 60s... ✓ PASS | 3000/3000 ok | p50: 19ms | p95: 27ms | p99: 138ms\n\n=================================================\n  RAMP Test Complete\n  Workload:               python\n  Max Passing RPS:        50\n  p50 at Max RPS:         19 ms\n  p95 at Max RPS:         27 ms\n  p99 at Max RPS:         138 ms\n  First Failure Mode:     None (reached max RPS)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"python\",\n    \"maxPassingRps\": 50,\n    \"passingStats\": {\n      \"min\": 17,\n      \"p50\": 19,\n      \"p95\": 27,\n      \"p99\": 138,\n      \"max\": 179,\n      \"avg\": 22\n    },\n    \"firstFailureMode\": \"None\",\n    \"steps\": [\n      {\n        \"rps\": 10,\n        \"durationSec\": 60,\n        \"total\": 600,\n        \"successes\": 600,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 21,\n          \"p99\": 27,\n          \"max\": 85,\n          \"avg\": 20\n        },\n        \"health\": {\n          \"memAvailPct\": 62.03007167441488,\n          \"load1\": 1.15,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 15,\n        \"durationSec\": 60,\n        \"total\": 900,\n        \"successes\": 900,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 21,\n          \"p99\": 24,\n          \"max\": 71,\n          \"avg\": 19\n        },\n        \"health\": {\n          \"memAvailPct\": 62.10700447577724,\n          \"load1\": 0.63,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 20,\n        \"durationSec\": 60,\n        \"total\": 1200,\n        \"successes\": 1200,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 21,\n          \"p99\": 25,\n          \"max\": 99,\n          \"avg\": 19\n        },\n        \"health\": {\n          \"memAvailPct\": 61.78717258673755,\n          \"load1\": 1.08,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 25,\n        \"durationSec\": 60,\n        \"total\": 1500,\n        \"successes\": 1500,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 21,\n          \"p99\": 68,\n          \"max\": 166,\n          \"avg\": 20\n        },\n        \"health\": {\n          \"memAvailPct\": 61.75131324390305,\n          \"load1\": 1.33,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 30,\n        \"durationSec\": 60,\n        \"total\": 1801,\n        \"successes\": 1801,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 21,\n          \"p99\": 48,\n          \"max\": 163,\n          \"avg\": 20\n        },\n        \"health\": {\n          \"memAvailPct\": 61.75170676206859,\n          \"load1\": 2.15,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 35,\n        \"durationSec\": 60,\n        \"total\": 2100,\n        \"successes\": 2100,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 20,\n          \"p95\": 28,\n          \"p99\": 364,\n          \"max\": 663,\n          \"avg\": 29\n        },\n        \"health\": {\n          \"memAvailPct\": 61.751510002985825,\n          \"load1\": 2.51,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 40,\n        \"durationSec\": 60,\n        \"total\": 2400,\n        \"successes\": 2400,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 25,\n          \"p99\": 57,\n          \"max\": 182,\n          \"avg\": 21\n        },\n        \"health\": {\n          \"memAvailPct\": 62.002820541451484,\n          \"load1\": 2.93,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 45,\n        \"durationSec\": 60,\n        \"total\": 2701,\n        \"successes\": 2701,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 20,\n          \"p95\": 28,\n          \"p99\": 145,\n          \"max\": 191,\n          \"avg\": 23\n        },\n        \"health\": {\n          \"memAvailPct\": 61.48559010262462,\n          \"load1\": 2.88,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 50,\n        \"durationSec\": 60,\n        \"total\": 3000,\n        \"successes\": 3000,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 17,\n          \"p50\": 19,\n          \"p95\": 27,\n          \"p99\": 138,\n          \"max\": 179,\n          \"avg\": 22\n        },\n        \"health\": {\n          \"memAvailPct\": 61.50831577668434,\n          \"load1\": 3.18,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "python",
+    "maxPassingRps": 50,
+    "passingStats": {
+      "min": 17,
+      "p50": 19,
+      "p95": 27,
+      "p99": 138,
+      "max": 179,
+      "avg": 22
+    },
+    "firstFailureMode": "None",
+    "steps": [
+      {
+        "rps": 10,
+        "durationSec": 60,
+        "total": 600,
+        "successes": 600,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 21,
+          "p99": 27,
+          "max": 85,
+          "avg": 20
+        },
+        "health": {
+          "memAvailPct": 62.03007167441488,
+          "load1": 1.15,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 15,
+        "durationSec": 60,
+        "total": 900,
+        "successes": 900,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 21,
+          "p99": 24,
+          "max": 71,
+          "avg": 19
+        },
+        "health": {
+          "memAvailPct": 62.10700447577724,
+          "load1": 0.63,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 20,
+        "durationSec": 60,
+        "total": 1200,
+        "successes": 1200,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 21,
+          "p99": 25,
+          "max": 99,
+          "avg": 19
+        },
+        "health": {
+          "memAvailPct": 61.78717258673755,
+          "load1": 1.08,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 25,
+        "durationSec": 60,
+        "total": 1500,
+        "successes": 1500,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 21,
+          "p99": 68,
+          "max": 166,
+          "avg": 20
+        },
+        "health": {
+          "memAvailPct": 61.75131324390305,
+          "load1": 1.33,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 30,
+        "durationSec": 60,
+        "total": 1801,
+        "successes": 1801,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 21,
+          "p99": 48,
+          "max": 163,
+          "avg": 20
+        },
+        "health": {
+          "memAvailPct": 61.75170676206859,
+          "load1": 2.15,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 35,
+        "durationSec": 60,
+        "total": 2100,
+        "successes": 2100,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 20,
+          "p95": 28,
+          "p99": 364,
+          "max": 663,
+          "avg": 29
+        },
+        "health": {
+          "memAvailPct": 61.751510002985825,
+          "load1": 2.51,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 40,
+        "durationSec": 60,
+        "total": 2400,
+        "successes": 2400,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 25,
+          "p99": 57,
+          "max": 182,
+          "avg": 21
+        },
+        "health": {
+          "memAvailPct": 62.002820541451484,
+          "load1": 2.93,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 45,
+        "durationSec": 60,
+        "total": 2701,
+        "successes": 2701,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 20,
+          "p95": 28,
+          "p99": 145,
+          "max": 191,
+          "avg": 23
+        },
+        "health": {
+          "memAvailPct": 61.48559010262462,
+          "load1": 2.88,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 50,
+        "durationSec": 60,
+        "total": 3000,
+        "successes": 3000,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 17,
+          "p50": 19,
+          "p95": 27,
+          "p99": 138,
+          "max": 179,
+          "avg": 22
+        },
+        "health": {
+          "memAvailPct": 61.50831577668434,
+          "load1": 3.18,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      }
+    ]
+  }
+}

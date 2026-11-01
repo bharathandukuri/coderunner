@@ -1,0 +1,69 @@
+{
+  "stdout": "\n=================================================\n  Starting RAMP Mode Load Test\n  Workload: mysql | Base URL: http://127.0.0.1:3000\n  RPS Range: 1 -> 5 (step: 1, duration: 60s)\n  Abort criteria: MemAvailable < 15%, load1 > 2x vCPUs, p95 > 2500ms, error rate > 5%\n=================================================\n\n• Testing 1 RPS for 60s... ✓ PASS | 61/61 ok | p50: 143ms | p95: 154ms | p99: 158ms\n• Testing 2 RPS for 60s... ✗ ABORT | p95 latency (16761ms) exceeded threshold (2500ms) | p50: 5657ms | p95: 16761ms | errors: 0.8%\n\n=================================================\n  RAMP Test Complete\n  Workload:               mysql\n  Max Passing RPS:        1\n  p50 at Max RPS:         143 ms\n  p95 at Max RPS:         154 ms\n  p99 at Max RPS:         158 ms\n  First Failure Mode:     p95 latency (16761ms) exceeded threshold (2500ms)\n=================================================\n\n\n=== Load Test Summary ===\n{\n  \"ramp\": {\n    \"workload\": \"mysql\",\n    \"maxPassingRps\": 1,\n    \"passingStats\": {\n      \"min\": 133,\n      \"p50\": 143,\n      \"p95\": 154,\n      \"p99\": 158,\n      \"max\": 158,\n      \"avg\": 143\n    },\n    \"firstFailureMode\": \"p95 latency (16761ms) exceeded threshold (2500ms)\",\n    \"steps\": [\n      {\n        \"rps\": 1,\n        \"durationSec\": 60,\n        \"total\": 61,\n        \"successes\": 61,\n        \"failures\": 0,\n        \"errorRate\": 0,\n        \"stats\": {\n          \"min\": 133,\n          \"p50\": 143,\n          \"p95\": 154,\n          \"p99\": 158,\n          \"max\": 158,\n          \"avg\": 143\n        },\n        \"health\": {\n          \"memAvailPct\": 62.70702129867881,\n          \"load1\": 2.04,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": true,\n        \"abortReasons\": []\n      },\n      {\n        \"rps\": 2,\n        \"durationSec\": 60,\n        \"total\": 120,\n        \"successes\": 119,\n        \"failures\": 1,\n        \"errorRate\": 0.008333333333333333,\n        \"stats\": {\n          \"min\": 133,\n          \"p50\": 5657,\n          \"p95\": 16761,\n          \"p99\": 17284,\n          \"max\": 17603,\n          \"avg\": 6608\n        },\n        \"health\": {\n          \"memAvailPct\": 71.97889955596393,\n          \"load1\": 3.58,\n          \"vCPUs\": 4,\n          \"circuitTripped\": false\n        },\n        \"passed\": false,\n        \"abortReasons\": [\n          \"p95 latency (16761ms) exceeded threshold (2500ms)\"\n        ]\n      }\n    ]\n  }\n}\n",
+  "stderr": "",
+  "summary": {
+    "workload": "mysql",
+    "maxPassingRps": 1,
+    "passingStats": {
+      "min": 133,
+      "p50": 143,
+      "p95": 154,
+      "p99": 158,
+      "max": 158,
+      "avg": 143
+    },
+    "firstFailureMode": "p95 latency (16761ms) exceeded threshold (2500ms)",
+    "steps": [
+      {
+        "rps": 1,
+        "durationSec": 60,
+        "total": 61,
+        "successes": 61,
+        "failures": 0,
+        "errorRate": 0,
+        "stats": {
+          "min": 133,
+          "p50": 143,
+          "p95": 154,
+          "p99": 158,
+          "max": 158,
+          "avg": 143
+        },
+        "health": {
+          "memAvailPct": 62.70702129867881,
+          "load1": 2.04,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": true,
+        "abortReasons": []
+      },
+      {
+        "rps": 2,
+        "durationSec": 60,
+        "total": 120,
+        "successes": 119,
+        "failures": 1,
+        "errorRate": 0.008333333333333333,
+        "stats": {
+          "min": 133,
+          "p50": 5657,
+          "p95": 16761,
+          "p99": 17284,
+          "max": 17603,
+          "avg": 6608
+        },
+        "health": {
+          "memAvailPct": 71.97889955596393,
+          "load1": 3.58,
+          "vCPUs": 4,
+          "circuitTripped": false
+        },
+        "passed": false,
+        "abortReasons": [
+          "p95 latency (16761ms) exceeded threshold (2500ms)"
+        ]
+      }
+    ]
+  }
+}

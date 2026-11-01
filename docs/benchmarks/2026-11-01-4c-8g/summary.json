@@ -1,0 +1,47 @@
+{
+  "hostEnv": {
+    "model": "12th Gen Intel(R) Core(TM) i5-12500H",
+    "governor": "performance",
+    "curFreq": "4200 MHz",
+    "acOnline": "AC Connected",
+    "temp": "60°C"
+  },
+  "vmEnv": {
+    "kernel": "6.8.0-147-generic",
+    "dockerVer": "Docker version 29.1.3, build 29.1.3-0ubuntu3~24.04.2",
+    "isolateVer": "The process isolator 2.7",
+    "memTotal": "7941 MB",
+    "vcpus": "4",
+    "envVars": "PORT=3000\nNODE_ENV=production\nWORKER_CONCURRENCY=8\nPOSTGRES_POOL_SIZE=6\nMYSQL_POOL_SIZE=6\nMAX_QUEUE_DEPTH=200\nRATE_LIMIT_SUBMISSIONS_MAX=240\nAUTH_TOKEN=test-token\nDOMAIN=localhost\nENABLE_MONITORING=true\nREDIS_URL=redis://redis:6379\nALERT_WEBHOOK_URL=http://localhost:5001/"
+  },
+  "overallSummary": {
+    "python": {
+      "runs": [
+        50,
+        50,
+        50
+      ],
+      "medianMaxRps": 50,
+      "overloadRps": 100,
+      "overloadRes": {
+        "workload": "python",
+        "overloadRps": 100,
+        "durationSec": 60,
+        "totalDispatched": 6000,
+        "statusCounts": {
+          "201": 6000
+        },
+        "sshAlive": true,
+        "runningContainers": 24
+      },
+      "statsAtMedian": {
+        "min": 17,
+        "p50": 18,
+        "p95": 21,
+        "p99": 28,
+        "max": 148,
+        "avg": 19
+      }
+    }
+  }
+}
