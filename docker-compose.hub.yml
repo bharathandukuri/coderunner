@@ -34,7 +34,6 @@ services:
         limits:
           cpus: '${CADDY_CPUS:-0.25}'
           memory: ${CADDY_MEMORY:-128M}
-          pids: ${CADDY_PIDS_LIMIT:-100}
 
   api:
     image: ${CODERUNNER_IMAGE_NAMESPACE:-bharathandukuri}/coderunner-api:${CODERUNNER_VERSION:-latest}
@@ -61,7 +60,6 @@ services:
         limits:
           cpus: '${API_CPUS:-0.5}'
           memory: ${API_MEMORY:-512M}
-          pids: ${API_PIDS_LIMIT:-200}
 
   worker:
     image: ${CODERUNNER_IMAGE_NAMESPACE:-bharathandukuri}/coderunner-worker:${CODERUNNER_VERSION:-latest}
@@ -91,7 +89,6 @@ services:
         limits:
           cpus: '${WORKER_CPUS:-1.5}'
           memory: ${WORKER_MEMORY:-4G}
-          pids: ${WORKER_PIDS_LIMIT:-500}
 
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
@@ -123,7 +120,6 @@ services:
         limits:
           cpus: '0.25'
           memory: 64M
-          pids: ${DOCKER_PROXY_PIDS_LIMIT:-50}
 
   worker-db:
     image: ${CODERUNNER_IMAGE_NAMESPACE:-bharathandukuri}/coderunner-worker:${CODERUNNER_VERSION:-latest}
@@ -154,7 +150,6 @@ services:
         limits:
           cpus: '${WORKER_DB_CPUS:-1.5}'
           memory: ${WORKER_DB_MEMORY:-2G}
-          pids: ${WORKER_DB_PIDS_LIMIT:-300}
 
   redis:
     image: redis:7-alpine
@@ -173,7 +168,6 @@ services:
         limits:
           cpus: '${REDIS_CPUS:-0.25}'
           memory: ${REDIS_MEMORY:-384M}
-          pids: ${REDIS_PIDS_LIMIT:-100}
 
   node-exporter:
     profiles: ["monitoring"]
@@ -199,7 +193,6 @@ services:
         limits:
           cpus: '0.2'
           memory: 128M
-          pids: ${NODE_EXPORTER_PIDS_LIMIT:-50}
 
   cadvisor:
     profiles: ["monitoring"]
@@ -223,7 +216,6 @@ services:
         limits:
           cpus: '0.3'
           memory: 256M
-          pids: ${CADVISOR_PIDS_LIMIT:-100}
 
   redis-exporter:
     profiles: ["monitoring"]
@@ -244,7 +236,6 @@ services:
         limits:
           cpus: '0.2'
           memory: 128M
-          pids: ${REDIS_EXPORTER_PIDS_LIMIT:-50}
 
   alertmanager:
     profiles: ["monitoring"]
@@ -273,7 +264,6 @@ services:
         limits:
           cpus: '0.25'
           memory: 128M
-          pids: ${ALERTMANAGER_PIDS_LIMIT:-100}
 
   prometheus:
     profiles: ["monitoring"]
@@ -303,7 +293,6 @@ services:
         limits:
           cpus: '${PROMETHEUS_CPUS:-0.25}'
           memory: ${PROMETHEUS_MEMORY:-512M}
-          pids: ${PROMETHEUS_PIDS_LIMIT:-200}
 
   grafana:
     profiles: ["monitoring"]
@@ -331,7 +320,6 @@ services:
         limits:
           cpus: '${GRAFANA_CPUS:-0.25}'
           memory: ${GRAFANA_MEMORY:-256M}
-          pids: ${GRAFANA_PIDS_LIMIT:-200}
 
 configs:
   caddyfile:
