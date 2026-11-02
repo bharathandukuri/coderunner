@@ -20,7 +20,8 @@ RUN mkdir -p /target/usr/bin /target/usr/lib/x86_64-linux-gnu && \
     done
 
 # Stage 2: Minimal Ubuntu 24.04 runtime (no package caches, no mongo tools like mongodump/mongos)
-FROM ubuntu:24.04
+# Pinned to Ubuntu 24.04 Noble Numbat digest (2026-10-24 build)
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
 # Copy mongod, mongosh, and exact required libraries from Stage 1 into /usr
 COPY --from=source /target/usr/bin/ /usr/bin/

@@ -11,6 +11,8 @@ NC='\033[0m'
 
 AUTO_INSTALL_ISOLATE=false
 SIZING_ONLY=false
+CHECK_IMAGE_ONLY=false
+CHECK_IMAGE_TARGET=""
 
 show_help() {
   cat << 'EOF'
@@ -27,25 +29,41 @@ Performs pre-deployment host system checks for CodeRunner:
 
 Options:
   --sizing-only       Only calculate and print the sizing requirements (hermetic, no host checks)
+  --check-image-only  Check presence of local images only (or single image if provided)
   --install-isolate   Automatically run scripts/install-isolate.sh if isolate is missing
   --help, -h          Show this help message and exit
 EOF
 }
 
-for arg in "$@"; do
-  case "$arg" in
+while [ $# -gt 0 ]; do
+  case "$1" in
     --sizing-only)
       SIZING_ONLY=true
+      shift
+      ;;
+    --check-image-only)
+      CHECK_IMAGE_ONLY=true
+      if [ $# -gt 1 ] && [[ "$2" != --* ]]; then
+        CHECK_IMAGE_TARGET="$2"
+        shift
+      fi
+      shift
+      ;;
+    --check-image-only=*)
+      CHECK_IMAGE_ONLY=true
+      CHECK_IMAGE_TARGET="${1#*=}"
+      shift
       ;;
     --install-isolate)
       AUTO_INSTALL_ISOLATE=true
+      shift
       ;;
     --help|-h)
       show_help
       exit 0
       ;;
     *)
-      echo "Unknown option: $arg" >&2
+      echo "Unknown option: $1" >&2
       show_help
       exit 1
       ;;
@@ -54,6 +72,33 @@ done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Fast hermetic image presence check
+if [ "$CHECK_IMAGE_ONLY" = true ]; then
+  if [ -n "$CHECK_IMAGE_TARGET" ]; then
+    NEEDED_IMAGES="$CHECK_IMAGE_TARGET"
+  else
+    NEEDED_IMAGES=$(node "$SCRIPT_DIR/dev/language-config.mjs" images 2>/dev/null || true)
+  fi
+  MISSING_IMAGES=""
+  for img in $NEEDED_IMAGES; do
+    label="Checking local image ($img)... "
+    if [ "$img" = "coderunner/mongodb:8.0" ]; then
+      label="Checking local MongoDB image (coderunner/mongodb:8.0)... "
+    fi
+    echo -n "$label"
+    if command -v docker >/dev/null 2>&1 && docker image inspect "$img" >/dev/null 2>&1; then
+      echo -e "${GREEN}✓ (found locally)${NC}"
+    else
+      echo -e "${RED}✗ Required image '$img' is missing locally${NC}"
+      MISSING_IMAGES="$MISSING_IMAGES $img"
+    fi
+  done
+  if [ -n "$MISSING_IMAGES" ]; then
+    exit 1
+  fi
+  exit 0
+fi
 
 # Read sizing and feature flags from .env and environment
 W_CONCURRENCY=2

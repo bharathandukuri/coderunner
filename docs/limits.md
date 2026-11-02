@@ -87,12 +87,13 @@ Where $\text{OvercommitFactor}$ is typically $2.0$ for compute-heavy workloads o
 > **Database Throughput Ceiling & Horizontal Scaling**: Database submissions are fundamentally limited to approximately **1 to 2 requests per second per node** (empirically measured for PostgreSQL 16 and MySQL 8.4; MongoDB 8.0 is not measured) regardless of host vCPU count. Because every database execution is fully sandboxed and consumes an isolated, ephemeral container boot, the Docker daemon serializes container destroy and create lifecycles under continuous load. **The only effective way to scale database throughput is horizontal worker scaling by adding `worker-db` nodes** (using `docker-compose.hub.yml`). In contrast, native code submissions run via Linux Isolate and scale linearly with host vCPUs (sustaining ≥ 70 req/s on 8 vCPUs with ~20 ms latency).
 
 > [!NOTE]
-> **MongoDB Throughput & Boot Sizing**: MongoDB 8.0 container boot time is approximately **1.6 s per container** (empirically measured over 10 samples: min 1.50 s, p50 1.57 s, max 1.60 s). Because of this container boot overhead, sustained throughput per node is lower than PostgreSQL/MySQL, and MongoDB sustained throughput remains classified as **not measured**. The 1 to 2 req/s ceiling remains labeled for PostgreSQL and MySQL only.
+> **MongoDB Throughput & Boot Sizing**: MongoDB 8.0 container boot time with the slim `coderunner/mongodb:8.0` image is approximately **0.70 s per container** (empirically measured over 10 samples: min 554 ms, p50 696 ms, max 4,408 ms; compared to 1.57 s p50 for the official `mongo:8.0` image). Because of this container boot overhead, sustained throughput per node is lower than PostgreSQL/MySQL, and MongoDB sustained throughput remains classified as **not measured**. The 1 to 2 req/s ceiling remains labeled for PostgreSQL and MySQL only.
 
 ### MongoDB Memory Sizing & tmpfs Integrity
 
 To ensure absolute container stability under arbitrary user script execution:
 - **Container Memory Cap**: 512 MB (`Memory: 512 * 1024 * 1024`).
+- **Memory Budget Guarantee**: WiredTiger cache (256 MB) + `/data/db` tmpfs (205 MB) + `/box` + mongod overhead < 512 MB cap.
 - **WiredTiger Cache**: `--wiredTigerCacheSizeGB 0.25` (256 MB internal dirty/clean page cache; MongoDB 8.0 enforces $\ge 0.25\text{ GB}$).
 - **Database Storage tmpfs**: `/data/db` mounted with `size=205m` (205 MB ephemeral in-memory tmpfs accommodating WiredTiger's mandatory $2 \times 100\text{ MB}$ pre-allocated journal files plus catalog metadata).
 - **Auxiliary tmpfs Mounts**: `/box` (256 MB), `/tmp` (64 MB), `/data/configdb` (16 MB).

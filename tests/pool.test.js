@@ -1629,14 +1629,14 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       const mockFailingDocker = path.join(tempBinDir, 'docker');
       fs.writeFileSync(
         mockFailingDocker,
-        `#!/usr/bin/env bash\nif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "coderunner/mongodb:8.0" ]; then exit 1; fi\nexec /usr/bin/docker "$@"\n`,
+        `#!/usr/bin/env bash\nif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "coderunner/mongodb:8.0" ]; then exit 1; fi\nexit 0\n`,
         { mode: 0o755 }
       );
 
       let failed = false;
       try {
         execSync(
-          `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh`,
+          `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh --check-image-only`,
           { encoding: 'utf-8', stdio: 'pipe' }
         );
       } catch (err) {
@@ -1650,12 +1650,12 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       const mockPassingDocker = path.join(tempBinDir, 'docker');
       fs.writeFileSync(
         mockPassingDocker,
-        `#!/usr/bin/env bash\nif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "coderunner/mongodb:8.0" ]; then exit 0; fi\nexec /usr/bin/docker "$@"\n`,
+        `#!/usr/bin/env bash\nif [ "$1" = "image" ] && [ "$2" = "inspect" ] && [ "$3" = "coderunner/mongodb:8.0" ]; then exit 0; fi\nexit 0\n`,
         { mode: 0o755 }
       );
 
       const passOutput = execSync(
-        `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh`,
+        `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh --check-image-only`,
         { encoding: 'utf-8', stdio: 'pipe' }
       );
       assert.match(passOutput, /Checking local MongoDB image \(coderunner\/mongodb:8.0\)\.\.\. .*✓ \(found locally\)/);
