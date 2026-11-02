@@ -71,7 +71,7 @@ const poolWaiters = new client.Gauge({
 const poolBootDuration = new client.Histogram({
   name: 'coderunner_pool_boot_duration_seconds',
   help: 'Duration of container boot in seconds',
-  labelNames: ['engine'],
+  labelNames: ['engine', 'mode'],
   buckets: [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10],
   registers: [register],
 });
@@ -86,8 +86,15 @@ const poolBootFailures = new client.Counter({
 const poolAcquireWaitDuration = new client.Histogram({
   name: 'coderunner_pool_acquire_wait_duration_seconds',
   help: 'Duration a request waited to acquire a container in seconds',
-  labelNames: ['engine'],
+  labelNames: ['engine', 'mode'],
   buckets: [0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5],
+  registers: [register],
+});
+
+const disabledLanguageJobsTotal = new client.Counter({
+  name: 'coderunner_disabled_language_jobs_total',
+  help: 'Total number of jobs rejected because language is disabled on worker',
+  labelNames: ['language_id', 'slug'],
   registers: [register],
 });
 
@@ -131,16 +138,20 @@ export function recordPoolWaiters(engine, count) {
   poolWaiters.set({ engine }, count);
 }
 
-export function recordPoolBootDuration(engine, durationSec) {
-  poolBootDuration.observe({ engine }, durationSec);
+export function recordPoolBootDuration(engine, durationSec, mode = 'pooled') {
+  poolBootDuration.observe({ engine, mode }, durationSec);
 }
 
 export function recordPoolBootFailure(engine) {
   poolBootFailures.inc({ engine });
 }
 
-export function recordPoolAcquireWait(engine, waitSec) {
-  poolAcquireWaitDuration.observe({ engine }, waitSec);
+export function recordPoolAcquireWait(engine, waitSec, mode = 'pooled') {
+  poolAcquireWaitDuration.observe({ engine, mode }, waitSec);
+}
+
+export function recordDisabledLanguageJob(languageId, slug) {
+  disabledLanguageJobsTotal.inc({ language_id: String(languageId), slug: String(slug) });
 }
 
 export function recordPoolCircuitState(engine, state) {
@@ -168,4 +179,5 @@ export default {
   recordPoolBootFailure,
   recordPoolAcquireWait,
   recordPoolCircuitState,
+  recordDisabledLanguageJob,
 };

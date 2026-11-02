@@ -10,6 +10,8 @@ export default {
   image: 'coderunner/mysql:8.4',
   compile_cmd: null,
   run_cmd: 'node /opt/runner/runner.js /box/query.sql',
+  user: '999:999',
+  pids_limit: 128,
   default_time_limit: 5,
   max_time_limit: 30,
   min_memory: 0,

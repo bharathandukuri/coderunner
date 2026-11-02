@@ -2,13 +2,24 @@ import fs from 'fs';
 import { execFileSync } from 'child_process';
 import config from '../utils/config.js';
 import logger from '../utils/logger.js';
-import { isDatabaseLanguage } from '../languages/index.js';
+import { isDatabaseLanguage, getLanguageById, getLanguagePoolFlag } from '../languages/index.js';
 import DockerExecutor from './DockerExecutor.js';
 import IsolateExecutor from './IsolateExecutor.js';
 
 let executorInstance = null;
 let executorType = null;
 let dockerExecutorInstance = null;
+const loggedIgnoredPoolSlugs = new Set();
+
+function checkIgnoredPoolFlag(languageId) {
+  if (languageId !== undefined && languageId !== null) {
+    const lang = getLanguageById(languageId);
+    if (lang && !isDatabaseLanguage(lang) && getLanguagePoolFlag(lang) && !loggedIgnoredPoolSlugs.has(lang.slug)) {
+      loggedIgnoredPoolSlugs.add(lang.slug);
+      logger.info({ language: lang.slug }, `Language pool flag for ${lang.slug} ignored because Isolate executor is active`);
+    }
+  }
+}
 
 function getDockerExecutor() {
   if (!dockerExecutorInstance) {
@@ -44,6 +55,9 @@ export function getExecutor(languageId) {
   }
 
   if (executorInstance) {
+    if (executorType === 'isolate') {
+      checkIgnoredPoolFlag(languageId);
+    }
     return executorInstance;
   }
 
@@ -53,6 +67,7 @@ export function getExecutor(languageId) {
     executorType = 'isolate';
     executorInstance = new IsolateExecutor();
     logger.info('Auto-selected Isolate executor (cgroup sandbox)');
+    checkIgnoredPoolFlag(languageId);
   } else {
     executorType = 'docker';
     executorInstance = getDockerExecutor();
@@ -101,8 +116,16 @@ export function getSystemCapabilities() {
   };
 }
 
+export function _resetExecutor() {
+  executorInstance = null;
+  executorType = null;
+  dockerExecutorInstance = null;
+  loggedIgnoredPoolSlugs.clear();
+}
+
 export default {
   getExecutor,
   getExecutorType,
   getSystemCapabilities,
+  _resetExecutor,
 };

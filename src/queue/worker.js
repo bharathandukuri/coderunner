@@ -5,9 +5,9 @@ import config, { getPoolConcurrency, describeLanguagePlan } from '../utils/confi
 import logger from '../utils/logger.js';
 import { executeCode } from './jobs/executeCode.js';
 import { executeMultiCode } from './jobs/executeMultiCode.js';
-import { getStatusById } from '../languages/index.js';
+import { getStatusById, isLanguageEnabled, getLanguageById } from '../languages/index.js';
 import { getWarmPool, peekWarmPool } from '../executor/pool/WarmContainerPool.js';
-import { metricsHandler } from '../api/metrics.js';
+import { metricsHandler, recordDisabledLanguageJob } from '../api/metrics.js';
 
 let redis = null;
 let activeWorkers = [];
@@ -42,6 +42,7 @@ function startMetricsServer() {
  * Update submission result in Redis and publish completion notification
  */
 async function updateSubmissionResult(token, result) {
+  if (!redis) return;
   const payload = JSON.stringify(result);
   await redis.setex(
     `submission:${token}`,
@@ -87,7 +88,7 @@ async function sendCallback(callbackUrl, submission) {
 /**
  * Process a submission job
  */
-async function processJob(job) {
+export async function processJob(job) {
   const submission = job.data;
   const token = submission.token;
 
@@ -96,6 +97,39 @@ async function processJob(job) {
     token,
     jobId: job.id,
   });
+
+  // Check if language is disabled on this worker
+  if (!isLanguageEnabled(submission.language_id)) {
+    const lang = getLanguageById(submission.language_id);
+    const slug = lang?.slug || 'unknown';
+    recordDisabledLanguageJob(submission.language_id, slug);
+
+    logger.warn({
+      event: 'job_disabled_language',
+      token,
+      jobId: job.id,
+      language_id: submission.language_id,
+      slug,
+    });
+
+    const result = {
+      ...submission,
+      status: getStatusById(13), // Internal Error
+      stderr: `Language ${slug} (id ${submission.language_id}) is disabled on this worker`,
+      compile_output: null,
+      message: `Language ${slug} is disabled on this worker`,
+      time: 0,
+      memory: 0,
+    };
+
+    await updateSubmissionResult(token, result);
+
+    if (submission.callback_url) {
+      await sendCallback(submission.callback_url, result);
+    }
+
+    return result;
+  }
 
   // Update status to Processing
   await updateSubmissionResult(token, {
@@ -283,4 +317,5 @@ if (process.argv[1] && process.argv[1].endsWith('worker.js')) {
 export default {
   startWorker,
   stopWorker,
+  processJob,
 };

@@ -11,6 +11,8 @@ export default {
   compile_cmd: null,
   run_cmd: "node /opt/runner/runner.js /box/query.sql",
   image: "coderunner/postgres:16",
+  user: "70:70",
+  pids_limit: 64,
   default_time_limit: 5,
   max_time_limit: 30,
 };

@@ -1,6 +1,6 @@
 import Joi from 'joi';
 import config from '../../utils/config.js';
-import { isValidLanguageId } from '../../languages/index.js';
+import { isValidLanguageId, isLanguageEnabled, getEnabledLanguages, getLanguageById } from '../../languages/index.js';
 import logger from '../../utils/logger.js';
 
 // Run validation schema (single file execution)
@@ -9,9 +9,6 @@ const runSchema = Joi.object({
   language_id: Joi.number().integer().required().custom((value, helpers) => {
     if (!isValidLanguageId(value)) {
       return helpers.error('any.invalid');
-    }
-    if (value === 10 && process.env.ENABLE_MONGODB !== 'true') {
-      return helpers.message({ custom: 'MongoDB (language_id: 10) is disabled. Set ENABLE_MONGODB=true to enable it.' });
     }
     return value;
   }),
@@ -77,9 +74,6 @@ const multiFileRunSchema = Joi.object({
   language_id: Joi.number().integer().required().custom((value, helpers) => {
     if (!isValidLanguageId(value)) {
       return helpers.error('any.invalid');
-    }
-    if (value === 10 && process.env.ENABLE_MONGODB !== 'true') {
-      return helpers.message({ custom: 'MongoDB (language_id: 10) is disabled. Set ENABLE_MONGODB=true to enable it.' });
     }
     return value;
   }),
@@ -170,6 +164,19 @@ export const batchMultiFileRunSchema = getBatchMultiFileRunSchema();
  * Validate run request
  */
 export function validateRun(req, res, next) {
+  if (req.body && req.body.language_id !== undefined) {
+    if (isValidLanguageId(req.body.language_id) && !isLanguageEnabled(req.body.language_id)) {
+      const lang = getLanguageById(req.body.language_id);
+      const langName = lang?.name ? lang.name.split(' (')[0] : 'Language';
+      return res.status(422).json({
+        error: 'Language is disabled',
+        message: `${langName} (language_id: ${req.body.language_id}) is disabled. Set ENABLE_MONGODB=true to enable it.`,
+        language_id: req.body.language_id,
+        enabled_languages: getEnabledLanguages().map(l => l.slug),
+      });
+    }
+  }
+
   const { error, value } = runSchema.validate(req.body, {
     abortEarly: false,
     stripUnknown: true,
@@ -193,6 +200,25 @@ export const validateSubmission = validateRun;
  * Validate batch run request
  */
 export function validateBatchRun(req, res, next) {
+  const items = req.body?.runs || req.body?.submissions;
+  if (Array.isArray(items)) {
+    const offendingIndexes = [];
+    items.forEach((item, idx) => {
+      if (item && item.language_id !== undefined && isValidLanguageId(item.language_id) && !isLanguageEnabled(item.language_id)) {
+        offendingIndexes.push(idx);
+      }
+    });
+    if (offendingIndexes.length > 0) {
+      return res.status(422).json({
+        error: 'Batch contains disabled languages',
+        message: `Batch contains disabled languages at indexes: ${offendingIndexes.join(', ')}`,
+        disabled_indexes: offendingIndexes,
+        offending_indexes: offendingIndexes,
+        enabled_languages: getEnabledLanguages().map(l => l.slug),
+      });
+    }
+  }
+
   const schema = getBatchRunSchema(config.execution?.maxBatchSize || 20);
   const { error, value } = schema.validate(req.body, {
     abortEarly: false,
@@ -230,6 +256,19 @@ export const validateBatchMultiSubmission = validateBatchMultiRun;
  * Validate multi-file run request
  */
 export function validateMultiRun(req, res, next) {
+  if (req.body && req.body.language_id !== undefined) {
+    if (isValidLanguageId(req.body.language_id) && !isLanguageEnabled(req.body.language_id)) {
+      const lang = getLanguageById(req.body.language_id);
+      const langName = lang?.name ? lang.name.split(' (')[0] : 'Language';
+      return res.status(422).json({
+        error: 'Language is disabled',
+        message: `${langName} (language_id: ${req.body.language_id}) is disabled. Set ENABLE_MONGODB=true to enable it.`,
+        language_id: req.body.language_id,
+        enabled_languages: getEnabledLanguages().map(l => l.slug),
+      });
+    }
+  }
+
   const { error, value } = multiFileRunSchema.validate(req.body, {
     abortEarly: false,
     stripUnknown: true,
@@ -251,6 +290,25 @@ export function validateMultiRun(req, res, next) {
  * Validate batch multi-file run request
  */
 export function validateBatchMultiRun(req, res, next) {
+  const items = req.body?.runs || req.body?.submissions;
+  if (Array.isArray(items)) {
+    const offendingIndexes = [];
+    items.forEach((item, idx) => {
+      if (item && item.language_id !== undefined && isValidLanguageId(item.language_id) && !isLanguageEnabled(item.language_id)) {
+        offendingIndexes.push(idx);
+      }
+    });
+    if (offendingIndexes.length > 0) {
+      return res.status(422).json({
+        error: 'Batch contains disabled languages',
+        message: `Batch contains disabled languages at indexes: ${offendingIndexes.join(', ')}`,
+        disabled_indexes: offendingIndexes,
+        offending_indexes: offendingIndexes,
+        enabled_languages: getEnabledLanguages().map(l => l.slug),
+      });
+    }
+  }
+
   const schema = getBatchMultiFileRunSchema(config.execution?.maxBatchSize || 20);
   const { error, value } = schema.validate(req.body, {
     abortEarly: false,

@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import config, { getPoolConcurrency } from '../../utils/config.js';
 import logger from '../../utils/logger.js';
 import { createDockerClient } from '../../utils/dockerClient.js';
-import { getLanguageById, getAllLanguages } from '../../languages/index.js';
+import { getLanguageById, getAllLanguages, isLanguageEnabled, getLanguagePoolFlag, isDatabaseLanguage } from '../../languages/index.js';
 import { buildContainerConfig } from '../containerConfig.js';
 import {
   recordPoolDepth,
@@ -19,6 +19,7 @@ export { getPoolConcurrency };
 
 export class WarmContainerPool {
   constructor(docker, options = {}) {
+    this.options = options;
     this.docker = docker || createDockerClient();
     this.customRedis = !!options.redis;
     this.redis = options.redis || (config.redis?.url ? new Redis(config.redis.url) : null);
@@ -102,118 +103,95 @@ export class WarmContainerPool {
       : process.env.ENABLE_MONGODB === 'true';
     this.enableMongodb = enableMongo;
 
-    // Supported warm pool languages (database engines)
-    this.pools = {
-      8: {
-        available: [],
-        waiters: [],
-        activeBoots: 0,
-        consecutiveFailures: 0,
-        circuitState: 'closed', // 'closed' | 'open' | 'half-open'
-        circuitOpenUntil: 0,
-        targetPoolSize: this.postgresPoolSize,
-        image: 'coderunner/postgres:16',
-        name: 'postgres',
-        langId: 8,
-        isDaemon: true,
-        user: '70:70',
-        pidsLimit: 64,
-        memoryLimit: 512 * 1024 * 1024,
-        readySignal: 'CODERUNNER_DAEMON_READY',
-      },
-      9: {
-        available: [],
-        waiters: [],
-        activeBoots: 0,
-        consecutiveFailures: 0,
-        circuitState: 'closed',
-        circuitOpenUntil: 0,
-        targetPoolSize: this.mysqlPoolSize,
-        image: 'coderunner/mysql:8.4',
-        name: 'mysql',
-        langId: 9,
-        isDaemon: true,
-        user: '999:999',
-        pidsLimit: 128,
-        memoryLimit: 512 * 1024 * 1024,
-        readySignal: 'CODERUNNER_DAEMON_READY',
-      },
-    };
-
-    if (enableMongo) {
-      const mongoLang = getLanguageById(10);
-      this.pools[10] = {
-        available: [],
-        waiters: [],
-        activeBoots: 0,
-        consecutiveFailures: 0,
-        circuitState: 'closed',
-        circuitOpenUntil: 0,
-        targetPoolSize: this.mongodbPoolSize,
-        image: mongoLang?.image || 'coderunner/mongodb:8.0',
-        name: 'mongodb',
-        langId: 10,
-        isDaemon: true,
-        pidsLimit: 128,
-        memoryLimit: 512 * 1024 * 1024,
-        readySignal: 'CODERUNNER_DAEMON_READY',
-        cmd: [
-          'bash',
-          '-c',
-          'mkdir -p /data/db && mongod --dbpath /data/db --wiredTigerCacheSizeGB 0.25 --setParameter diagnosticDataCollectionEnabled=false --bind_ip 127.0.0.1 --fork --logpath /box/mongo.log && touch /box/.ready && exec sleep infinity',
-        ],
-      };
-    }
-
     // A4: Language pools opt-in via ENABLE_LANGUAGE_POOL (default false)
     const enableLanguagePool = options.enableLanguagePool !== undefined
       ? Boolean(options.enableLanguagePool)
       : (process.env.ENABLE_LANGUAGE_POOL === 'true');
     this.enableLanguagePool = enableLanguagePool;
 
-    if (this.enableLanguagePool) {
-      const allLangs = getAllLanguages();
-      const nonDbLangs = allLangs.filter(l => l.category !== 'database' && !l.is_archived);
+    this.pools = {};
+    const allLangs = getAllLanguages();
 
-      // Group by image so languages sharing an image share one pool
-      const imageGroups = new Map();
-      for (const lang of nonDbLangs) {
-        if (!imageGroups.has(lang.image)) {
-          imageGroups.set(lang.image, []);
-        }
-        imageGroups.get(lang.image).push(lang);
+    // 1. Database language pools
+    const dbLangs = allLangs.filter(l => isDatabaseLanguage(l));
+    for (const lang of dbLangs) {
+      if (!this.isLanguageEnabled(lang)) continue;
+      if (!this.getLanguagePoolFlag(lang)) continue;
+
+      let targetPoolSize = baseConcurrency;
+      if (lang.slug === 'postgresql' || lang.id === 8) {
+        targetPoolSize = this.postgresPoolSize;
+      } else if (lang.slug === 'mysql' || lang.id === 9) {
+        targetPoolSize = this.mysqlPoolSize;
+      } else if (lang.slug === 'mongodb' || lang.id === 10) {
+        targetPoolSize = this.mongodbPoolSize;
       }
 
-      for (const [image, langs] of imageGroups) {
-        const maxMinMemory = Math.max(...langs.map(l => l.min_memory || 0));
-        const effectiveMemory = Math.max(maxMinMemory, 256000);
-        const maxPidsLimit = Math.max(...langs.map(l => l.pids_limit || 0), 64);
-        const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
-        const name = langs.map(l => (l.name || '').split(/[\s(]/)[0].toLowerCase()).join('_');
+      const poolDef = {
+        available: [],
+        waiters: [],
+        activeBoots: 0,
+        consecutiveFailures: 0,
+        circuitState: 'closed',
+        circuitOpenUntil: 0,
+        targetPoolSize,
+        image: lang.image,
+        name: lang.slug === 'postgresql' ? 'postgres' : lang.slug,
+        langId: lang.id,
+        isDaemon: true,
+        user: lang.user || (lang.id === 8 ? '70:70' : (lang.id === 9 ? '999:999' : null)),
+        pidsLimit: lang.pids_limit || (lang.id === 8 ? 64 : 128),
+        memoryLimit: 512 * 1024 * 1024,
+        readySignal: 'CODERUNNER_DAEMON_READY',
+      };
+      if (lang.cmd) {
+        poolDef.cmd = lang.cmd;
+      }
+      this.pools[lang.id] = poolDef;
+    }
 
-        const sharedPool = {
-          available: [],
-          waiters: [],
-          activeBoots: 0,
-          consecutiveFailures: 0,
-          circuitState: 'closed',
-          circuitOpenUntil: 0,
-          targetPoolSize: baseConcurrency,
-          image,
-          name,
-          isDaemon: false,
-          user: null,
-          pidsLimit: maxPidsLimit,
-          minMemory: maxMinMemory,
-          effectiveMemory,
-          memoryLimit: effectiveMemory * 1024,
-          boxSize,
-          languages: langs.map(l => l.id),
-        };
+    // 2. Non-database language pools
+    const nonDbLangs = allLangs.filter(l => !isDatabaseLanguage(l) && !l.is_archived);
+    const imageGroups = new Map();
+    for (const lang of nonDbLangs) {
+      if (!this.isLanguageEnabled(lang)) continue;
+      if (!this.getLanguagePoolFlag(lang)) continue;
 
-        for (const lang of langs) {
-          this.pools[lang.id] = sharedPool;
-        }
+      if (!imageGroups.has(lang.image)) {
+        imageGroups.set(lang.image, []);
+      }
+      imageGroups.get(lang.image).push(lang);
+    }
+
+    for (const [image, langs] of imageGroups) {
+      const maxMinMemory = Math.max(...langs.map(l => l.min_memory || 0));
+      const effectiveMemory = Math.max(maxMinMemory, 256000);
+      const maxPidsLimit = Math.max(...langs.map(l => l.pids_limit || 0), 64);
+      const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
+      const name = langs.map(l => (l.name || '').split(/[\s(]/)[0].toLowerCase()).join('_');
+
+      const sharedPool = {
+        available: [],
+        waiters: [],
+        activeBoots: 0,
+        consecutiveFailures: 0,
+        circuitState: 'closed',
+        circuitOpenUntil: 0,
+        targetPoolSize: this.targetPoolSize || baseConcurrency,
+        image,
+        name,
+        isDaemon: false,
+        user: null,
+        pidsLimit: maxPidsLimit,
+        minMemory: maxMinMemory,
+        effectiveMemory,
+        memoryLimit: effectiveMemory * 1024,
+        boxSize,
+        languages: langs.map(l => l.id),
+      };
+
+      for (const lang of langs) {
+        this.pools[lang.id] = sharedPool;
       }
     }
 
@@ -276,6 +254,37 @@ export class WarmContainerPool {
     } else {
       this.currentConcurrentBoots = Math.max(0, this.currentConcurrentBoots - 1);
     }
+  }
+
+  isLanguageEnabled(lang) {
+    if (!lang) return false;
+    if (this.options?.enabledLanguages && Array.isArray(this.options.enabledLanguages)) {
+      return this.options.enabledLanguages.includes(lang.id) || this.options.enabledLanguages.includes(lang.slug);
+    }
+    if (lang.slug === 'mongodb') {
+      if (this.options?.enableMongodb !== undefined) return Boolean(this.options.enableMongodb);
+      if (process.env.ENABLE_MONGODB === 'true' || process.env.LANGUAGE_MONGODB_ENABLED === 'true') return true;
+    }
+    return isLanguageEnabled(lang);
+  }
+
+  getLanguagePoolFlag(lang) {
+    if (!lang) return false;
+    if (this.options?.languagePoolFlags) {
+      const custom = this.options.languagePoolFlags[lang.slug] ?? this.options.languagePoolFlags[lang.id];
+      if (custom !== undefined) return Boolean(custom);
+    }
+    if (this.options?.[lang.slug + 'Pool'] !== undefined) {
+      return Boolean(this.options[lang.slug + 'Pool']);
+    }
+    if (lang.slug === 'mongodb') {
+      if (this.options?.enableMongodb !== undefined) return Boolean(this.options.enableMongodb);
+      if (process.env.ENABLE_MONGODB === 'true' || process.env.LANGUAGE_MONGODB_POOL === 'true') return true;
+    }
+    if (!isDatabaseLanguage(lang) && this.options?.enableLanguagePool !== undefined) {
+      return Boolean(this.options.enableLanguagePool);
+    }
+    return getLanguagePoolFlag(lang);
   }
 
   /**
@@ -458,18 +467,19 @@ export class WarmContainerPool {
       throw new Error(`${pName} pool is shutting down`);
     }
 
-    const isDbDaemon = pool ? Boolean(pool.isDaemon) : Boolean(lang && lang.category === 'database' && lang.is_daemon);
+    const isDbDaemon = pool ? Boolean(pool.isDaemon) : Boolean(lang && (lang.category === 'database' || isDatabaseLanguage(lang)) && lang.is_daemon);
+    const poolFlag = this.getLanguagePoolFlag(lang);
 
-    if (isDbDaemon && !pool) {
-      throw new Error(`No container pool configured for language ${languageId}`);
+    // If pool is not configured or language POOL flag is false, run on-demand
+    if (!poolFlag || !pool) {
+      const acquireStart = Date.now();
+      const container = await this.createOnDemandContainer(languageId, submission);
+      recordPoolAcquireWait(pool?.name || lang?.slug || String(languageId), (Date.now() - acquireStart) / 1000, 'on_demand');
+      return container;
     }
 
     // A6: On-demand fallback (language containers only)
     if (!isDbDaemon) {
-      if (!pool) {
-        return await this.createOnDemandContainer(languageId, submission);
-      }
-
       // Check if request limits are outside what container.update can express (C4 / A6)
       const reqMem = submission && submission.memory_limit;
       const exceedsPool = reqMem && reqMem > (pool.effectiveMemory || 256000);
@@ -487,7 +497,10 @@ export class WarmContainerPool {
         if (poolEmpty && !circuitOpen) {
           this.checkReplenish(languageId);
         }
-        return await this.createOnDemandContainer(languageId, submission);
+        const acquireStart = Date.now();
+        const container = await this.createOnDemandContainer(languageId, submission);
+        recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000, 'on_demand');
+        return container;
       }
     }
 
@@ -499,7 +512,7 @@ export class WarmContainerPool {
       try {
         const inspect = await container.inspect();
         if (inspect.State.Running) {
-          recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000);
+          recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000, 'pooled');
           recordPoolDepth(pool.name, pool.available.length);
           this.checkReplenish(languageId);
           if (!isDbDaemon && submission) {
@@ -518,7 +531,9 @@ export class WarmContainerPool {
     // If a non-db pool became empty after dead containers, fall back to on-demand per A6
     if (!isDbDaemon) {
       this.checkReplenish(languageId);
-      return await this.createOnDemandContainer(languageId, submission);
+      const container = await this.createOnDemandContainer(languageId, submission);
+      recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000, 'on_demand');
+      return container;
     }
 
     recordPoolDepth(pool.name, 0);
@@ -566,7 +581,7 @@ export class WarmContainerPool {
           }
           settled = true;
           clearTimeout(timer);
-          recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000);
+          recordPoolAcquireWait(pool.name, (Date.now() - acquireStart) / 1000, 'pooled');
           if (!isDbDaemon && submission) {
             this.applyResourceLimits(container, submission, lang)
               .then(() => resolve(container))
@@ -751,7 +766,7 @@ export class WarmContainerPool {
       this.inFlightBoots.add(bootPromise);
 
       container = await bootPromise;
-      recordPoolBootDuration(pool.name, (Date.now() - bootStart) / 1000);
+      recordPoolBootDuration(pool.name, (Date.now() - bootStart) / 1000, 'pooled');
 
       if (this.isShuttingDown) {
         if (container) {
@@ -880,24 +895,42 @@ export class WarmContainerPool {
   async createOnDemandContainer(languageId, submission = {}) {
     const sub = submission || {};
     const lang = sub.language || getLanguageById(languageId);
-    const containerConfig = buildContainerConfig({
-      language: lang,
-      submission: sub,
-      instanceId: this.instanceId,
-      isDaemon: Boolean(lang && lang.category === 'database' && lang.is_daemon),
-      isPool: false,
-    });
+    const isDaemon = Boolean(lang && (lang.category === 'database' || isDatabaseLanguage(lang)) && lang.is_daemon);
+    const langName = (lang && lang.slug) || (lang?.name ? lang.name.toLowerCase().split(/[\s(]/)[0] : String(languageId));
 
+    if (isDaemon) {
+      await this.acquireBootSlot();
+    }
+
+    const bootStart = Date.now();
     let container = null;
     try {
+      const containerConfig = buildContainerConfig({
+        language: lang,
+        submission: sub,
+        instanceId: this.instanceId,
+        isDaemon,
+        isPool: false,
+      });
+
       container = await this.docker.createContainer(containerConfig);
       await container.start();
       if (container && container.id) {
         this.trackedOnDemandIds.add(container.id);
       }
+
+      if (isDaemon) {
+        await this.awaitReadySignal(container);
+      }
+
+      recordPoolBootDuration(langName, (Date.now() - bootStart) / 1000, 'on_demand');
       return container;
     } catch (err) {
-      if (container && typeof container.remove === 'function') {
+      recordPoolBootFailure(langName);
+      if (container) {
+        if (container.id) {
+          this.trackedOnDemandIds.delete(container.id);
+        }
         try {
           await container.remove({ force: true, v: true });
         } catch {
@@ -905,6 +938,10 @@ export class WarmContainerPool {
         }
       }
       throw err;
+    } finally {
+      if (isDaemon) {
+        this.releaseBootSlot();
+      }
     }
   }
 

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getLanguageById, getActiveLanguages, getAllLanguages } from '../../languages/index.js';
+import { getLanguageById, getActiveLanguages, getAllLanguages, isLanguageEnabled } from '../../languages/index.js';
 
 const router = Router();
 
@@ -45,9 +45,8 @@ router.get('/:id', (req, res) => {
   }
 
   const language = getLanguageById(id);
-  const mongoEnabled = process.env.ENABLE_MONGODB === 'true';
 
-  if (!language || (language.id === 10 && !mongoEnabled)) {
+  if (!language || !isLanguageEnabled(language)) {
     return res.status(404).json({
       error: 'Not Found',
       message: `Language with ID ${id} not found`,

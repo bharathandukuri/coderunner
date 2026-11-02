@@ -116,8 +116,9 @@ export function buildContainerConfig({
   };
 
   if (isDaemon) {
-    if (pool && pool.user) {
-      containerConfig.User = pool.user;
+    const user = (pool && pool.user) || lang.user;
+    if (user) {
+      containerConfig.User = user;
     }
     const daemonCmd = (pool && pool.cmd) || lang.cmd;
     if (daemonCmd) {
