@@ -1,5 +1,6 @@
 export default {
   id: 89,
+  slug: 'multi',
   name: 'Multi-file program',
   is_archived: false,
   source_file: null,

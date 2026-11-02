@@ -1,5 +1,6 @@
 export default {
   id: 4,
+  slug: "javascript",
   name: "JavaScript (Node.js 18.15.0)",
   is_archived: false,
   source_file: "main.js",

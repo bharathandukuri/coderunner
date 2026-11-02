@@ -1,5 +1,6 @@
 export default {
   id: 7,
+  slug: "sqlite",
   name: "SQL (SQLite 3)",
   category: "database",
   is_daemon: false,

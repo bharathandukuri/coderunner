@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import os from 'os';
-import { getAllStatuses } from '../../languages/index.js';
+import { getAllStatuses, describeLanguagePlan } from '../../languages/index.js';
 import { getQueueStats, getWorkerStats } from '../../queue/producer.js';
 import { getSystemCapabilities, getExecutorType } from '../../executor/ExecutorFactory.js';
 import config from '../../utils/config.js';
@@ -27,6 +27,24 @@ router.get('/about', (req, res) => {
     source_code: 'https://github.com/bharathandukuri/coderunner',
     maintainer: 'CodeRunner Team',
   });
+});
+
+/**
+ * GET /system
+ * Get system overview and per-language execution plan
+ */
+router.get('/system', (req, res) => {
+  try {
+    const capabilities = getSystemCapabilities();
+    res.json({
+      status: 'healthy',
+      version: '1.0.0',
+      capabilities,
+      language_plan: describeLanguagePlan(),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 /**

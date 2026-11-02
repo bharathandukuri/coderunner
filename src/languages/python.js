@@ -1,5 +1,6 @@
 export default {
   id: 5,
+  slug: "python",
   name: "Python (3.8.10)",
   is_archived: false,
   source_file: "main.py",

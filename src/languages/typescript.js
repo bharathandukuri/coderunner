@@ -1,5 +1,6 @@
 export default {
   id: 6,
+  slug: "typescript",
   name: "TypeScript (5.0.3)",
   is_archived: false,
   source_file: "ts-main.ts",

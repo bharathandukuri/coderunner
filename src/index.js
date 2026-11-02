@@ -1,9 +1,12 @@
 import { startServer } from './api/server.js';
 import { initializeQueue, closeQueue } from './queue/producer.js';
 import logger from './utils/logger.js';
-import config from './utils/config.js';
+import config, { describeLanguagePlan } from './utils/config.js';
 
 async function main() {
+  console.log('\n=== CodeRunner Language Plan ===');
+  console.table(describeLanguagePlan());
+
   logger.info({
     event: 'starting',
     environment: config.server.nodeEnv,

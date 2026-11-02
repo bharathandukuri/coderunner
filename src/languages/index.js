@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import python from './python.js';
 import javascript from './javascript.js';
 import cpp from './cpp.js';
@@ -8,14 +9,257 @@ import sqlite from './sqlite.js';
 import postgres from './postgres.js';
 import mysql from './mysql.js';
 import mongodb from './mongodb.js';
+import multi from './multi.js';
 
-// Map of all supported languages by ID
+// Map of all supported languages by ID and slug
 const languagesById = new Map();
-const languagesList = [c, cpp, java, javascript, python, typescript, sqlite, postgres, mysql, mongodb];
+const languagesBySlug = new Map();
+const languagesList = [c, cpp, java, javascript, python, typescript, sqlite, postgres, mysql, mongodb, multi];
 
 languagesList.forEach(lang => {
   languagesById.set(lang.id, lang);
+  if (lang.slug) {
+    languagesBySlug.set(lang.slug.toLowerCase(), lang);
+  }
 });
+
+let parsedConfig = null;
+
+function parseBooleanStrict(val, varName) {
+  if (val === undefined || val === null || val === '') return undefined;
+  if (val === 'true') return true;
+  if (val === 'false') return false;
+  throw new Error(`Invalid value "${val}" for ${varName}: must be "true" or "false"`);
+}
+
+/**
+ * Initialize and validate language configuration from environment
+ * @param {object} env - Environment variables object
+ * @param {boolean} force - Force re-initialization
+ * @returns {object} Parsed configuration maps and warnings
+ */
+export function initLanguageConfig(env = process.env, force = false) {
+  if (parsedConfig && !force) return parsedConfig;
+
+  if (env.ENABLED_LANGUAGES !== undefined) {
+    throw new Error('ENABLED_LANGUAGES is not supported. Use per-language variables like LANGUAGE_<SLUG>_ENABLED instead.');
+  }
+
+  const enabledMap = new Map();
+  const poolMap = new Map();
+  const warnings = [];
+
+  // Check deprecated aliases
+  let deprecatedPoolAlias = undefined;
+  if (env.ENABLE_LANGUAGE_POOL !== undefined && env.ENABLE_LANGUAGE_POOL !== '') {
+    deprecatedPoolAlias = parseBooleanStrict(env.ENABLE_LANGUAGE_POOL, 'ENABLE_LANGUAGE_POOL');
+    warnings.push('ENABLE_LANGUAGE_POOL is deprecated; use LANGUAGE_<SLUG>_POOL');
+  }
+
+  let deprecatedMongoAlias = undefined;
+  if (env.ENABLE_MONGODB !== undefined && env.ENABLE_MONGODB !== '') {
+    deprecatedMongoAlias = parseBooleanStrict(env.ENABLE_MONGODB, 'ENABLE_MONGODB');
+    warnings.push('ENABLE_MONGODB is deprecated; use LANGUAGE_MONGODB_ENABLED');
+  }
+
+  for (const lang of languagesList) {
+    const slugUpper = lang.slug.toUpperCase();
+    const enabledVar = `LANGUAGE_${slugUpper}_ENABLED`;
+    const poolVar = `LANGUAGE_${slugUpper}_POOL`;
+
+    // 1. Resolve Enabled flag
+    let enabled;
+    const rawEnabled = env[enabledVar];
+    if (rawEnabled !== undefined && rawEnabled !== '') {
+      enabled = parseBooleanStrict(rawEnabled, enabledVar);
+    } else if (lang.slug === 'mongodb' && deprecatedMongoAlias !== undefined) {
+      enabled = deprecatedMongoAlias;
+    } else {
+      enabled = lang.slug !== 'mongodb'; // default true, except mongodb = false
+    }
+
+    // 2. Resolve Pool flag
+    let pool;
+    const isDb = isDatabaseLanguage(lang);
+    const rawPool = env[poolVar];
+    const explicitPoolSet = rawPool !== undefined && rawPool !== '';
+
+    if (explicitPoolSet) {
+      pool = parseBooleanStrict(rawPool, poolVar);
+    } else if (!isDb && deprecatedPoolAlias !== undefined) {
+      pool = deprecatedPoolAlias;
+    } else {
+      pool = isDb; // default true for database languages, false for all others
+    }
+
+    // A POOL flag set for a disabled language logs a warning and is ignored
+    if (!enabled && explicitPoolSet && pool) {
+      warnings.push(`POOL flag set for disabled language ${lang.slug} (${poolVar}) is ignored`);
+      pool = false;
+    } else if (!enabled) {
+      pool = false;
+    }
+
+    enabledMap.set(lang.id, enabled);
+    enabledMap.set(lang.slug, enabled);
+    poolMap.set(lang.id, pool);
+    poolMap.set(lang.slug, pool);
+  }
+
+  // Log warnings
+  for (const w of warnings) {
+    console.warn(`[WARN] ${w}`);
+  }
+
+  // Startup fails if no language is enabled
+  const anyEnabled = languagesList.some(lang => enabledMap.get(lang.id));
+  if (!anyEnabled) {
+    throw new Error('At least one language must be enabled. No languages are currently enabled.');
+  }
+
+  parsedConfig = { enabledMap, poolMap, warnings };
+  return parsedConfig;
+}
+
+/**
+ * Reset language config (for test suites)
+ */
+export function _resetLanguageConfig() {
+  parsedConfig = null;
+}
+
+function ensureConfig() {
+  if (!parsedConfig) {
+    initLanguageConfig(process.env);
+  }
+}
+
+/**
+ * Check if a language is enabled
+ * @param {object|number|string} languageOrId - Language object, ID, or slug
+ * @returns {boolean} True if enabled
+ */
+export function isLanguageEnabled(languageOrId) {
+  ensureConfig();
+  if (!languageOrId) return false;
+  if (typeof languageOrId === 'object') {
+    return parsedConfig.enabledMap.get(languageOrId.id) ?? false;
+  }
+  if (typeof languageOrId === 'number' || /^\d+$/.test(languageOrId)) {
+    return parsedConfig.enabledMap.get(Number(languageOrId)) ?? false;
+  }
+  return parsedConfig.enabledMap.get(String(languageOrId).toLowerCase()) ?? false;
+}
+
+/**
+ * Get language POOL flag value
+ * @param {object|number|string} languageOrId - Language object, ID, or slug
+ * @returns {boolean} True if pool flag is active
+ */
+export function getLanguagePoolFlag(languageOrId) {
+  ensureConfig();
+  if (!languageOrId) return false;
+  if (typeof languageOrId === 'object') {
+    return parsedConfig.poolMap.get(languageOrId.id) ?? false;
+  }
+  if (typeof languageOrId === 'number' || /^\d+$/.test(languageOrId)) {
+    return parsedConfig.poolMap.get(Number(languageOrId)) ?? false;
+  }
+  return parsedConfig.poolMap.get(String(languageOrId).toLowerCase()) ?? false;
+}
+
+/**
+ * Get list of all enabled languages
+ * @returns {object[]} List of enabled language configurations
+ */
+export function getEnabledLanguages() {
+  ensureConfig();
+  return languagesList.filter(lang => isLanguageEnabled(lang));
+}
+
+/**
+ * Describe the execution and pooling strategy plan per enabled language
+ * @param {object} options - Options override (e.g. executor: 'isolate' | 'docker')
+ * @returns {Array<{ slug: string, executor: string, strategy: string, poolSize: number }>}
+ */
+export function describeLanguagePlan(options = {}) {
+  ensureConfig();
+  const enabled = getEnabledLanguages();
+
+  let isolateAvailable = options.isolateAvailable;
+  if (isolateAvailable === undefined) {
+    if (options.executor === 'isolate' || process.env.EXECUTOR_TYPE === 'isolate') {
+      isolateAvailable = true;
+    } else if (options.executor === 'docker' || process.env.EXECUTOR_TYPE === 'docker') {
+      isolateAvailable = false;
+    } else {
+      try {
+        execFileSync('isolate', ['--version'], { stdio: 'pipe', timeout: 5000 });
+        isolateAvailable = true;
+      } catch {
+        isolateAvailable = false;
+      }
+    }
+  }
+
+  const rawConcurrency = Number(process.env.WORKER_CONCURRENCY);
+  const baseWorkerConcurrency = Number.isInteger(rawConcurrency) && rawConcurrency > 0 ? rawConcurrency : 2;
+  const rawDbConcurrency = Number(process.env.WORKER_DB_CONCURRENCY);
+  const dbConcurrency = Number.isInteger(rawDbConcurrency) && rawDbConcurrency > 0 ? rawDbConcurrency : baseWorkerConcurrency;
+
+  return enabled.map(lang => {
+    const isDb = isDatabaseLanguage(lang);
+    const poolFlag = getLanguagePoolFlag(lang);
+
+    let executor;
+    let strategy;
+    let poolSize = 0;
+
+    if (isDb) {
+      executor = 'docker';
+      if (poolFlag) {
+        strategy = 'pooled';
+        if (lang.slug === 'postgresql') {
+          const pg = Number(process.env.POSTGRES_POOL_SIZE);
+          poolSize = Number.isInteger(pg) && pg > 0 ? pg : dbConcurrency;
+        } else if (lang.slug === 'mysql') {
+          const my = Number(process.env.MYSQL_POOL_SIZE);
+          poolSize = Number.isInteger(my) && my > 0 ? my : dbConcurrency;
+        } else if (lang.slug === 'mongodb') {
+          const mg = Number(process.env.MONGODB_POOL_SIZE);
+          poolSize = Number.isInteger(mg) && mg > 0 ? mg : dbConcurrency;
+        } else {
+          poolSize = dbConcurrency;
+        }
+      } else {
+        strategy = 'on-demand-boot';
+        poolSize = 0;
+      }
+    } else {
+      if (isolateAvailable) {
+        executor = 'isolate';
+        strategy = 'on-demand';
+        poolSize = 0;
+      } else {
+        executor = 'docker';
+        if (poolFlag) {
+          strategy = 'pooled';
+          poolSize = baseWorkerConcurrency;
+        } else {
+          strategy = 'on-demand';
+          poolSize = 0;
+        }
+      }
+    }
+
+    return {
+      slug: lang.slug,
+      executor,
+      strategy,
+      poolSize,
+    };
+  });
+}
 
 /**
  * Get language by ID
@@ -27,25 +271,35 @@ export function getLanguageById(id) {
 }
 
 /**
- * Get all active (non-archived) languages
+ * Get language by slug
+ * @param {string} slug - Language slug
+ * @returns {object|null} Language configuration
+ */
+export function getLanguageBySlug(slug) {
+  if (!slug) return null;
+  return languagesBySlug.get(slug.toLowerCase()) || null;
+}
+
+/**
+ * Get all active (non-archived and enabled) languages
  * @returns {object[]} List of active languages
  */
 export function getActiveLanguages() {
-  const mongoEnabled = process.env.ENABLE_MONGODB === 'true';
+  ensureConfig();
   return languagesList.filter(lang => {
-    if (lang.id === 10 && !mongoEnabled) return false;
+    if (!isLanguageEnabled(lang)) return false;
     return !lang.is_archived;
   });
 }
 
 /**
- * Get all languages (including archived)
+ * Get all languages (marking disabled or archived ones as archived)
  * @returns {object[]} List of all languages
  */
 export function getAllLanguages() {
-  const mongoEnabled = process.env.ENABLE_MONGODB === 'true';
+  ensureConfig();
   return languagesList.map(lang => {
-    if (lang.id === 10 && !mongoEnabled) {
+    if (!isLanguageEnabled(lang) || lang.is_archived) {
       return { ...lang, is_archived: true };
     }
     return lang;
@@ -70,7 +324,8 @@ export function isDatabaseLanguage(languageOrId) {
   if (!languageOrId) return false;
   const lang = typeof languageOrId === 'object'
     ? languageOrId
-    : getLanguageById(typeof languageOrId === 'string' ? parseInt(languageOrId, 10) : languageOrId);
+    : (languagesById.get(typeof languageOrId === 'string' ? parseInt(languageOrId, 10) : languageOrId)
+      || languagesBySlug.get(String(languageOrId).toLowerCase()));
   return Boolean(lang && (lang.is_daemon || (lang.category === 'database' && lang.is_daemon)));
 }
 
@@ -110,7 +365,14 @@ export function getAllStatuses() {
 }
 
 export default {
+  initLanguageConfig,
+  _resetLanguageConfig,
+  isLanguageEnabled,
+  getLanguagePoolFlag,
+  getEnabledLanguages,
+  describeLanguagePlan,
   getLanguageById,
+  getLanguageBySlug,
   getActiveLanguages,
   getAllLanguages,
   isValidLanguageId,

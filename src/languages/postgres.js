@@ -1,5 +1,6 @@
 export default {
   id: 8,
+  slug: "postgresql",
   name: "PostgreSQL 16",
   category: "database",
   is_daemon: true,

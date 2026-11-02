@@ -1,7 +1,7 @@
 import { Worker } from 'bullmq';
 import Redis from 'ioredis';
 import http from 'http';
-import config, { getPoolConcurrency } from '../utils/config.js';
+import config, { getPoolConcurrency, describeLanguagePlan } from '../utils/config.js';
 import logger from '../utils/logger.js';
 import { executeCode } from './jobs/executeCode.js';
 import { executeMultiCode } from './jobs/executeMultiCode.js';
@@ -200,6 +200,9 @@ export async function startWorker(options = {}) {
     queues: queueNames,
     concurrency,
   });
+
+  console.log('\n=== CodeRunner Language Plan ===');
+  console.table(describeLanguagePlan());
 
   // A5: Never create or warm pools in WORKER_TYPE=isolate workers
   if (workerType !== 'isolate') {

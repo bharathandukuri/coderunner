@@ -1,5 +1,6 @@
 export default {
   id: 3,
+  slug: "java",
   name: "Java (OpenJDK 17)",
   is_archived: false,
   source_file: "Main.java",

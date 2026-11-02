@@ -1,5 +1,6 @@
 export default {
   id: 2,
+  slug: "cpp",
   name: "C++ (GCC 9.4.0)",
   is_archived: false,
   source_file: "main.cpp",

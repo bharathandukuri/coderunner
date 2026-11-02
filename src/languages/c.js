@@ -1,5 +1,6 @@
 export default {
   id: 1,
+  slug: 'c',
   name: 'C (GCC 9.4.0)',
   is_archived: false,
   source_file: 'main.c',

@@ -1,5 +1,6 @@
 export default {
   id: 9,
+  slug: 'mysql',
   name: 'MySQL (8.4 LTS)',
   category: 'database',
   is_daemon: true,

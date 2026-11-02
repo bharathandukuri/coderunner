@@ -1,5 +1,6 @@
 export default {
   id: 10,
+  slug: 'mongodb',
   name: 'MongoDB (8.0 LTS)',
   category: 'database',
   is_daemon: true,

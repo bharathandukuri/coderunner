@@ -1,3 +1,14 @@
+import {
+  initLanguageConfig,
+  isLanguageEnabled,
+  getEnabledLanguages,
+  getLanguagePoolFlag,
+  describeLanguagePlan,
+} from '../languages/index.js';
+
+// Initialize and strictly validate language configuration at startup
+initLanguageConfig(process.env);
+
 export function parsePositiveIntEnv(envName, rawVal, defaultValue) {
   if (rawVal === undefined || rawVal === null || rawVal === '') {
     return defaultValue;
@@ -84,8 +95,15 @@ const config = {
   },
 
   mongodb: {
-    enabled: process.env.ENABLE_MONGODB === 'true',
+    enabled: isLanguageEnabled('mongodb'),
   },
+};
+
+export {
+  isLanguageEnabled,
+  getEnabledLanguages,
+  getLanguagePoolFlag,
+  describeLanguagePlan,
 };
 
 /**
