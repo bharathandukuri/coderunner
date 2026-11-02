@@ -121,32 +121,31 @@ cmd_build() {
 
   echo "Current build tag: $current_sha"
 
-  # Build database images if directories exist
-  if [ -d docker/images/postgres ]; then
+  # Build runtime images needed by enabled languages
+  local needed_images
+  needed_images=$(node "$PROJECT_DIR/scripts/dev/language-config.mjs" images 2>/dev/null || true)
+
+  should_build_image() {
+    local img="$1"
+    echo "$needed_images" | grep -qw "$img"
+  }
+
+  if [ -d docker/images/postgres ] && should_build_image "coderunner/postgres:16"; then
     echo "Building coderunner/postgres:16..."
     docker build -t coderunner/postgres:16 docker/images/postgres
   fi
 
-  if [ -d docker/images/mysql ]; then
+  if [ -d docker/images/mysql ] && should_build_image "coderunner/mysql:8.4"; then
     echo "Building coderunner/mysql:8.4..."
     docker build -t coderunner/mysql:8.4 docker/images/mysql
   fi
 
-  if [ -d docker/images/multi ]; then
+  if [ -d docker/images/multi ] && should_build_image "coderunner/multi:latest"; then
     echo "Building coderunner/multi:latest..."
     docker build -t coderunner/multi:latest docker/images/multi
   fi
 
-  local enable_mongo="${ENABLE_MONGODB:-false}"
-  if [ -f "$PROJECT_DIR/.env" ]; then
-    local env_mongo
-    env_mongo=$(grep '^ENABLE_MONGODB=' "$PROJECT_DIR/.env" 2>/dev/null | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
-    if [ -n "$env_mongo" ]; then
-      enable_mongo="$env_mongo"
-    fi
-  fi
-
-  if [ "$enable_mongo" = "true" ] && [ -d docker/images/mongodb ]; then
+  if [ -d docker/images/mongodb ] && should_build_image "coderunner/mongodb:8.0"; then
     echo "Building coderunner/mongodb:8.0..."
     docker build -t coderunner/mongodb:8.0 docker/images/mongodb
   fi

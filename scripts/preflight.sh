@@ -97,33 +97,27 @@ if [ "$MONITORING_ACTIVE" = "false" ]; then
   BASE_MEM=150
 fi
 
-if [ "$SIZING_ONLY" = true ]; then
-  TOTAL_MEM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo 8192)
-  HOST_VCPUS=$(nproc 2>/dev/null || echo 4)
+# Compute sizing via language-config.mjs (hermetic, no Docker required)
+SIZING_INFO=$(node "$SCRIPT_DIR/dev/language-config.mjs" sizing --shell 2>/dev/null || true)
+if [ -n "$SIZING_INFO" ]; then
+  eval "$SIZING_INFO"
+else
+  # Fallback
   OS_RESERVE=350
   PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
   MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
   MONGO_MEM=0
   if [ "$ENABLE_MONGO" = "true" ]; then
-    MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_mb.txt"
-    if [ -f "$MONGO_MEASURED_FILE" ]; then
-      MONGO_PER_CONTAINER_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
-    else
-      MONGO_PER_CONTAINER_MB=250
-    fi
-    MONGO_MEM=$(( (MONGO_POOL + W_DB_CONCURRENCY) * MONGO_PER_CONTAINER_MB ))
+    MONGO_MEM=$(( (MONGO_POOL + W_DB_CONCURRENCY) * 250 ))
   fi
-  ISOLATE_MEM=$(( W_CONCURRENCY * 250 ))
-
-  MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISOLATE_MEM ))
+  ISO_MEM=$(( W_CONCURRENCY * 250 ))
+  MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))
   MIN_VCPUS_RECOMMENDED=2
-  if [ "$W_CONCURRENCY" -ge 4 ]; then
-    MIN_VCPUS_RECOMMENDED=4
-  fi
-  if [ "$W_CONCURRENCY" -ge 8 ]; then
-    MIN_VCPUS_RECOMMENDED=8
-  fi
+fi
 
+if [ "$SIZING_ONLY" = true ]; then
+  TOTAL_MEM_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo 8192)
+  HOST_VCPUS=$(nproc 2>/dev/null || echo 4)
   echo "Host RAM and CPU Sizing (docs/limits.md formula)... ✓ RAM: ${TOTAL_MEM_MB:-8192}MB total (min recommended: ${MEM_MIN_RECOMMENDED}MB) | vCPUs: ${HOST_VCPUS:-4} (min: ${MIN_VCPUS_RECOMMENDED})"
   exit 0
 fi
@@ -155,16 +149,27 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# Verify local MongoDB image when ENABLE_MONGODB=true
-if [ "$ENABLE_MONGO" = "true" ]; then
-  echo -n "      Checking local MongoDB image (coderunner/mongodb:8.0)... "
-  if command -v docker >/dev/null 2>&1 && docker image inspect coderunner/mongodb:8.0 >/dev/null 2>&1; then
+# Verify local runtime images for enabled languages
+echo "[2/8] Checking local runtime images for enabled languages..."
+NEEDED_IMAGES=$(node "$SCRIPT_DIR/dev/language-config.mjs" images 2>/dev/null || true)
+MISSING_IMAGES=""
+for img in $NEEDED_IMAGES; do
+  label="Checking local image ($img)... "
+  if [ "$img" = "coderunner/mongodb:8.0" ]; then
+    label="Checking local MongoDB image (coderunner/mongodb:8.0)... "
+  fi
+  echo -n "      $label"
+  if command -v docker >/dev/null 2>&1 && docker image inspect "$img" >/dev/null 2>&1; then
     echo -e "${GREEN}✓ (found locally)${NC}"
   else
-    echo -e "${RED}✗ Required image 'coderunner/mongodb:8.0' is missing locally${NC}"
-    echo "      Run 'scripts/build-images.sh' or 'scripts/deploy.sh build' before deploying with ENABLE_MONGODB=true."
-    ERRORS=$((ERRORS + 1))
+    echo -e "${RED}✗ Required image '$img' is missing locally${NC}"
+    MISSING_IMAGES="$MISSING_IMAGES $img"
   fi
+done
+
+if [ -n "$MISSING_IMAGES" ]; then
+  echo "      Run 'scripts/build-images.sh' or 'scripts/deploy.sh build' before deploying."
+  ERRORS=$((ERRORS + 1))
 fi
 
 # 2. cgroup v2
@@ -223,38 +228,35 @@ HOST_VCPUS=$(nproc || echo 1)
 # MySQL: (pool_size + db_concurrency) * 280MB
 # MongoDB: (pool_size * measured_idle_ram) + (db_concurrency * 512MB job cap) when ENABLE_MONGODB=true
 # Worker Isolate: concurrency * 250MB
-BASE_MEM=360
-if [ "$MONITORING_ACTIVE" = "false" ]; then
-  BASE_MEM=150
-fi
-OS_RESERVE=350
-PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
-MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
-MONGO_MEM=0
-if [ "$ENABLE_MONGO" = "true" ]; then
-  MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_idle_mb.txt"
-  if [ -f "$MONGO_MEASURED_FILE" ]; then
-    MONGO_IDLE_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
-  elif [ -f "$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_mb.txt" ]; then
-    MONGO_IDLE_MB=90
-  else
-    MONGO_IDLE_MB=90
-    echo -e "${YELLOW}  ⚠ Warning: MongoDB memory calculation is using an unmeasured estimate (${MONGO_IDLE_MB}MB/container).${NC}"
+if [ -z "${MEM_MIN_RECOMMENDED:-}" ]; then
+  BASE_MEM=360
+  if [ "$MONITORING_ACTIVE" = "false" ]; then
+    BASE_MEM=150
   fi
-  MONGO_P=${MONGO_POOL:-0}
-  if [ "$MONGO_P" -le 0 ]; then
-    MONGO_P=$W_CONCURRENCY
+  OS_RESERVE=350
+  PG_MEM=$(( (PG_POOL + W_DB_CONCURRENCY) * 75 ))
+  MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
+  MONGO_MEM=0
+  if [ "$ENABLE_MONGO" = "true" ]; then
+    MONGO_MEASURED_FILE="$PROJECT_DIR/docs/benchmarks/mongodb-footprint/measured_idle_mb.txt"
+    if [ -f "$MONGO_MEASURED_FILE" ]; then
+      MONGO_IDLE_MB=$(cat "$MONGO_MEASURED_FILE" | tr -d '[:space:]')
+    else
+      MONGO_IDLE_MB=90
+    fi
+    MONGO_P=${MONGO_POOL:-0}
+    if [ "$MONGO_P" -le 0 ]; then
+      MONGO_P=$W_CONCURRENCY
+    fi
+    MONGO_JOB_MB=512
+    MONGO_MEM=$(( (MONGO_P * MONGO_IDLE_MB) + (W_DB_CONCURRENCY * MONGO_JOB_MB) ))
   fi
-  MONGO_JOB_MB=512
-  MONGO_MEM=$(( (MONGO_P * MONGO_IDLE_MB) + (W_DB_CONCURRENCY * MONGO_JOB_MB) ))
-fi
-ISO_MEM=$(( W_CONCURRENCY * 250 ))
-MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))
-
-# Minimum vCPUs: 1 vCPU for budget concurrency 2, 2 vCPUs for higher concurrency
-MIN_VCPUS_RECOMMENDED=1
-if [ "$(( W_CONCURRENCY + W_DB_CONCURRENCY ))" -gt 3 ]; then
-  MIN_VCPUS_RECOMMENDED=2
+  ISO_MEM=$(( W_CONCURRENCY * 250 ))
+  MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))
+  MIN_VCPUS_RECOMMENDED=1
+  if [ "$(( W_CONCURRENCY + W_DB_CONCURRENCY ))" -gt 3 ]; then
+    MIN_VCPUS_RECOMMENDED=2
+  fi
 fi
 
 DISK_MIN_RECOMMENDED=3072 # 3GB free disk

@@ -334,4 +334,27 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
 
     await pool.shutdown();
   });
+
+  it('10. scripts/dev/language-config.mjs outputs enabled languages, images, and sizing', async () => {
+    const { execSync } = await import('node:child_process');
+
+    const languagesOut = execSync('node scripts/dev/language-config.mjs languages', { encoding: 'utf-8' }).trim();
+    assert.ok(languagesOut.includes('python'));
+    assert.ok(languagesOut.includes('postgresql'));
+
+    const imagesOut = execSync('node scripts/dev/language-config.mjs images', { encoding: 'utf-8' }).trim();
+    assert.ok(imagesOut.includes('coderunner/python:3.8'));
+    assert.ok(imagesOut.includes('coderunner/postgres:16'));
+
+    const sizingOut = execSync('node scripts/dev/language-config.mjs sizing --shell', { encoding: 'utf-8' }).trim();
+    assert.match(sizingOut, /MEM_MIN_RECOMMENDED=\d+/);
+    assert.match(sizingOut, /WARM_RAM_MB=\d+/);
+  });
+
+  it('11. scripts/preflight.sh --sizing-only runs hermetically without Docker', async () => {
+    const { execSync } = await import('node:child_process');
+    const out = execSync('bash scripts/preflight.sh --sizing-only', { encoding: 'utf-8' }).trim();
+    assert.match(out, /Host RAM and CPU Sizing/);
+    assert.match(out, /min recommended: \d+MB/);
+  });
 });
