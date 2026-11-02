@@ -49,6 +49,22 @@ curl -X POST http://localhost:3000/submissions?wait=true \
   -d '{"language_id": 71, "source_code": "print(sum(range(100)))"}'
 ```
 
+## Language & Pool Configuration
+
+Control which languages are enabled and whether warm container pools are maintained via `.env`:
+
+```bash
+# Enable or disable specific languages (default true, except mongodb=false)
+LANGUAGE_PYTHON_ENABLED=true
+LANGUAGE_MONGODB_ENABLED=true
+
+# Warm container pooling (default true for databases, false for code languages)
+# Turning database pools off saves idle RAM (~280MB for MySQL) at the cost of container boot latency (~1.4s)
+LANGUAGE_MYSQL_POOL=false
+LANGUAGE_POSTGRESQL_POOL=true
+LANGUAGE_PYTHON_POOL=false
+```
+
 ## Documentation
 
 - [Local Development Guide](docs/local.md): Local prerequisites, running with Isolate vs Docker, enabling language pools, and running unit tests.

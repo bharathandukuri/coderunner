@@ -133,6 +133,24 @@ When incoming load exceeds server sizing boundaries, CoderRunner degrades predic
    - If requests arrive faster than containers can be returned or replenished, incoming database jobs queue up to `POOL_MAX_WAITERS`.
    - If a warm container crashes during execution, the worker initiates fallback on-demand recovery. If 3 consecutive boot attempts fail, the **Circuit Breaker** trips, temporarily protecting the Docker daemon from fork storms while alerting operators via Prometheus.
 
+### 5.1 Language Execution & Pooling Matrix
+
+The table below defines how each language executes based on category, executor type, and `LANGUAGE_<SLUG>_POOL` flag:
+
+| Language Category | Executor Type | POOL Flag | Execution Result |
+| ----------------- | ------------- | --------- | ---------------- |
+| Database (`postgresql`, `mysql`, `mongodb`) | Always Docker | `true` | Warm container pool of `WORKER_CONCURRENCY` (or `*_POOL_SIZE` override, integer ≥ 1). Instant acquire (~5 ms). |
+| Database (`postgresql`, `mysql`, `mongodb`) | Always Docker | `false` | Single-use container booted per job with identical daemon config, command, ready signal, and global boot cap (`WARM_POOL_MAX_CONCURRENT_BOOTS`). Destroyed on release; never the `sleep` path. |
+| Non-database (C, Python, Java, etc.) | Isolate | Any (`true`/`false`) | Runs in Linux Isolate; pool flag is ignored (logged once at startup). |
+| Non-database (C, Python, Java, etc.) | Docker | `true` | Warm container pool, with on-demand fallback when empty, circuit breaker open, queue full, or custom resource limits requested. |
+| Non-database (C, Python, Java, etc.) | Docker | `false` | On-demand single-use container booted per job. |
+
+#### Database Pool Trade-Off (Boot Latency vs Idle RAM)
+Operating database languages with pooling disabled (`LANGUAGE_<SLUG>_POOL=false`) dramatically reduces host memory requirements by freeing idle container overhead, at the direct expense of request latency:
+- **PostgreSQL 16**: Disabling pool saves **75 MB idle RAM** per container, but pays **~1.1 s container boot latency** per submission (laptop benchmark figures from `docs/benchmarks/`).
+- **MySQL 8.4**: Disabling pool saves **280 MB idle RAM** per container, but pays **~1.4 s container boot latency** per submission.
+- **MongoDB 8.0**: Disabling pool saves **~90 MB idle RAM** per container, but pays **~1.6 s container boot latency** per submission.
+
 ---
 
 ## 6. Environment Variable Reference
@@ -177,6 +195,28 @@ The table below catalogs every environment variable controlling capacity, concur
 | `GRAFANA_PIDS_LIMIT`               | `100`                                | Compose    | Process count ceiling for Grafana container                                     |
 | `GRAFANA_SITE_ADDRESS`             | `localhost:3001`                     | Compose    | Bind address for Grafana web interface                                          |
 | `INSTANCE_ID`                      | `worker-<uuid>`                      | Worker     | Unique worker identifier used for container tagging and orphan cleanup          |
+| `LANGUAGE_C_ENABLED`               | `true`                               | Worker/API | Enable execution for C (`gcc:9`)                                                |
+| `LANGUAGE_C_POOL`                  | `false`                              | Worker     | Maintain warm container pool for C when running in Docker                       |
+| `LANGUAGE_CPP_ENABLED`             | `true`                               | Worker/API | Enable execution for C++ (`gcc:9`)                                              |
+| `LANGUAGE_CPP_POOL`                | `false`                              | Worker     | Maintain warm container pool for C++ when running in Docker                     |
+| `LANGUAGE_JAVA_ENABLED`            | `true`                               | Worker/API | Enable execution for Java (`java:17`)                                           |
+| `LANGUAGE_JAVA_POOL`               | `false`                              | Worker     | Maintain warm container pool for Java when running in Docker                    |
+| `LANGUAGE_JAVASCRIPT_ENABLED`      | `true`                               | Worker/API | Enable execution for JavaScript (`node:18`)                                     |
+| `LANGUAGE_JAVASCRIPT_POOL`         | `false`                              | Worker     | Maintain warm container pool for JavaScript when running in Docker              |
+| `LANGUAGE_MONGODB_ENABLED`         | `false`                              | Worker/API | Enable execution for MongoDB (`mongodb:8.0`)                                    |
+| `LANGUAGE_MONGODB_POOL`            | `true`                               | Worker     | Maintain warm container pool for MongoDB (when enabled)                         |
+| `LANGUAGE_MULTI_ENABLED`           | `true`                               | Worker/API | Enable execution for multi-file submissions (`multi:latest`)                    |
+| `LANGUAGE_MULTI_POOL`              | `false`                              | Worker     | Maintain warm container pool for multi-file submissions                         |
+| `LANGUAGE_MYSQL_ENABLED`           | `true`                               | Worker/API | Enable execution for MySQL (`mysql:8.4`)                                        |
+| `LANGUAGE_MYSQL_POOL`              | `true`                               | Worker     | Maintain warm container pool for MySQL                                          |
+| `LANGUAGE_POSTGRESQL_ENABLED`      | `true`                               | Worker/API | Enable execution for PostgreSQL (`postgres:16`)                                 |
+| `LANGUAGE_POSTGRESQL_POOL`         | `true`                               | Worker     | Maintain warm container pool for PostgreSQL                                     |
+| `LANGUAGE_PYTHON_ENABLED`          | `true`                               | Worker/API | Enable execution for Python (`python:3.8`)                                      |
+| `LANGUAGE_PYTHON_POOL`             | `false`                              | Worker     | Maintain warm container pool for Python when running in Docker                  |
+| `LANGUAGE_SQLITE_ENABLED`          | `true`                               | Worker/API | Enable execution for SQLite (`sqlite:3`)                                        |
+| `LANGUAGE_SQLITE_POOL`             | `false`                              | Worker     | Maintain warm container pool for SQLite                                         |
+| `LANGUAGE_TYPESCRIPT_ENABLED`      | `true`                               | Worker/API | Enable execution for TypeScript (`typescript:5`)                                |
+| `LANGUAGE_TYPESCRIPT_POOL`         | `false`                              | Worker     | Maintain warm container pool for TypeScript when running in Docker              |
 | `MAX_ADDITIONAL_FILES_SIZE`        | `2097152`                            | Sandbox    | Maximum size (bytes) of auxiliary files submitted with code (2 MB)              |
 | `MAX_BATCH_SIZE`                   | `20`                                 | API        | Maximum number of submissions allowed in a single batch request                 |
 | `MAX_CONCURRENT_WAIT_REQUESTS`     | `concurrency * 25`                   | API        | Maximum simultaneous HTTP requests holding long-poll connections (`?wait=true`) |

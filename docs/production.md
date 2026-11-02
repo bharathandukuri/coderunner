@@ -262,10 +262,21 @@ If a deployment fails:
 
 ---
 
+## Language Enablement & Pooling Configuration
+
+Every supported language has an explicit enablement flag and pooling setting:
+- `LANGUAGE_<SLUG>_ENABLED`: Defaults to `true` for all languages except `mongodb` (`false`). Set to `false` to completely disable a language, hiding it from `GET /languages` and rejecting submissions with HTTP 422.
+- `LANGUAGE_<SLUG>_POOL`: Defaults to `true` for database engines (`postgresql`, `mysql`, `mongodb`) and `false` for compiled/scripted languages.
+  - **Database languages with POOL=true**: Maintain a warm pool of size `WORKER_CONCURRENCY` (or `*_POOL_SIZE` override) for instant ~5 ms acquire.
+  - **Database languages with POOL=false**: Boot single-use on-demand containers under the global boot cap (`WARM_POOL_MAX_CONCURRENT_BOOTS`), saving idle RAM (~75 MB for Postgres, ~280 MB for MySQL, ~90 MB for Mongo per container) at the cost of ~1.1s - 1.6s container boot latency per request.
+  - **Non-database languages**: When Linux Isolate is active, pool flags are ignored with zero Docker overhead. When running under Docker, `POOL=true` maintains warm standby containers with on-demand fallback.
+
+---
+
 ## Security Considerations: MongoDB Support
 
-MongoDB (language ID 10) is **opt-in and disabled by default** (`ENABLE_MONGODB=false`). When enabled:
-- **Sandbox Boundaries**: MongoDB queries execute inside an ephemeral, hardened container (`coderunner/mongodb:8.0`, built via multi-stage build in `docker/images/mongodb/Dockerfile`, ~694 MB) under unprivileged user `runner` (uid 1001). Preflight verifies this image is present locally before deployment. Build it via `scripts/build-images.sh` or `ENABLE_MONGODB=true scripts/deploy.sh build`.
+MongoDB (language ID 10) is **opt-in and disabled by default** (`LANGUAGE_MONGODB_ENABLED=false`). When enabled:
+- **Sandbox Boundaries**: MongoDB queries execute inside an ephemeral, hardened container (`coderunner/mongodb:8.0`, built via multi-stage build in `docker/images/mongodb/Dockerfile`, ~694 MB) under unprivileged user `runner` (uid 1001). Preflight verifies this image is present locally before deployment. Build it via `scripts/build-images.sh` or `LANGUAGE_MONGODB_ENABLED=true scripts/deploy.sh build`.
 - **Hardening Flags**: `NetworkMode: none` (completely air-gapped), `CapDrop: ALL` (all Linux capabilities dropped), `ReadonlyRootfs: true`, `no-new-privileges: true`, strict memory (`512MB`), and process limit (`pidsLimit: 128`, providing headroom for `mongod` background threads and `mongosh` worker threads).
 - **Node.js Environment**: Because `mongosh` is implemented in Node.js, user scripts have access to Node globals (`process.env`, `require('fs')`, `require('child_process')`). User code can read files within the container's isolated rootfs (such as `/etc/passwd`) and spawn child processes as the unprivileged `runner` user (uid 1001), identical to untrusted Python or Node.js submissions. Subprocesses run with no network access (`NetworkMode: none`), all capabilities dropped (`CapDrop: ALL`), `no-new-privileges: true`, and a read-only root filesystem (`ReadonlyRootfs: true`). Administrative commands (`shutdownServer`, `shutdown`) are filtered by CodeRunner's static analyzer as convenience guardrails, but these AST/regex checks are not a security boundary as dynamic property access or child processes can bypass them.
 - If running untrusted multi-tenant workloads, keep `ENABLE_MONGODB=false` unless MongoDB query execution is explicitly required.

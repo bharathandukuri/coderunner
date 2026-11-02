@@ -36,10 +36,14 @@ Only a minimal set of environment variables are required for local development:
 | `REDIS_URL`            | `redis://localhost:6379` | Connection string for BullMQ submission queues                  |
 | `WORKER_TYPE`          | `all`                    | Worker execution target: `all`, `isolate`, or `docker`          |
 | `WORKER_CONCURRENCY`   | `4`                      | Number of simultaneous submissions processed by the worker      |
-| `DOCKER_SOCKET`        | `/var/run/docker.sock`   | Local Docker daemon control socket path                         |
-| `ENABLE_LANGUAGE_POOL` | `false`                  | Enable pre-warmed containers for standard programming languages |
-| `POSTGRES_POOL_SIZE`   | `1`                      | Target idle warm container depth for PostgreSQL 16              |
-| `MYSQL_POOL_SIZE`      | `1`                      | Target idle warm container depth for MySQL 8.4                  |
+| `DOCKER_SOCKET`              | `/var/run/docker.sock`   | Local Docker daemon control socket path                         |
+| `LANGUAGE_<SLUG>_ENABLED`    | `true` (`mongodb`: `false`) | Enable or disable a specific language (`c`, `cpp`, `python`, `mongodb`, etc.) |
+| `LANGUAGE_<SLUG>_POOL`       | `true` (DBs) / `false` (code) | Enable warm container pooling per language (`postgresql`, `mysql`, `python`, etc.) |
+| `POSTGRES_POOL_SIZE`         | `1`                      | Target idle warm container depth for PostgreSQL 16              |
+| `MYSQL_POOL_SIZE`            | `1`                      | Target idle warm container depth for MySQL 8.4                  |
+
+> [!TIP]
+> **Saving Local RAM**: Setting `LANGUAGE_POSTGRESQL_POOL=false` and `LANGUAGE_MYSQL_POOL=false` in `.env` saves ~355 MB of idle RAM on development machines. CodeRunner will automatically boot a single-use container on demand with identical configuration when testing database queries.
 
 ## Starting & Stopping Services
 
