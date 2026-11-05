@@ -46,7 +46,8 @@ Submit code:
 ```bash
 curl -X POST http://localhost:3000/submissions?wait=true \
   -H "Content-Type: application/json" \
-  -d '{"language_id": 71, "source_code": "print(sum(range(100)))"}'
+  -H "X-Auth-Token: your-secret-token" \
+  -d '{"language_id": 5, "source_code": "print(sum(range(100)))"}'
 ```
 
 ## Language & Pool Configuration

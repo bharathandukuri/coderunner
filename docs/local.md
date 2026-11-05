@@ -79,7 +79,32 @@ Or with auto-restart on file changes:
 npm run dev
 ```
 
-### 4. Stop Services
+### 4. Quick Verification (curl)
+
+Once Redis, the worker, and the API are running, verify the service with test `curl` requests:
+
+```bash
+# Health check (unauthenticated)
+curl -s http://localhost:3000/health
+
+# List supported languages
+curl -s http://localhost:3000/languages \
+  -H "X-Auth-Token: your-secret-token"
+
+# Execute Python (Language ID 5) synchronously
+curl -s -X POST "http://localhost:3000/submissions?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: your-secret-token" \
+  -d '{"language_id": 5, "source_code": "print(\"Hello from CodeRunner!\")"}'
+
+# Execute JavaScript (Language ID 4) synchronously
+curl -s -X POST "http://localhost:3000/submissions?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: your-secret-token" \
+  -d '{"language_id": 4, "source_code": "console.log(\"Node.js works! Result:\", 6 * 7);"}'
+```
+
+### 5. Stop Services
 
 ```bash
 # Press Ctrl+C in worker and API terminal windows

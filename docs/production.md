@@ -124,7 +124,84 @@ Then open in your local browser:
 
 ---
 
-## 5. Alert Definitions & Operator Runbooks
+## 5. Quick Test & API Smoke Testing (curl)
+
+After starting the stack or deploying changes, run these quick `curl` commands from the server (or locally using your domain or IP):
+
+```bash
+# Set your API auth token from .env
+AUTH_TOKEN=$(grep '^AUTH_TOKEN=' .env | cut -d '=' -f 2-)
+BASE_URL="http://localhost" # or "https://judge.example.com"
+
+# 1. Health check (unauthenticated, returns {"status":"healthy",...})
+curl -s "${BASE_URL}/health"
+
+# 2. List available execution languages
+curl -s "${BASE_URL}/languages" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}"
+
+# 3. Synchronous Python execution (Language ID 5)
+curl -s -X POST "${BASE_URL}/submissions?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}" \
+  -d '{
+    "language_id": 5,
+    "source_code": "import sys\nprint(\"Hello from Python!\", sys.version.split()[0])"
+  }'
+
+# 4. Synchronous JavaScript (Node.js) execution (Language ID 4)
+curl -s -X POST "${BASE_URL}/submissions?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}" \
+  -d '{
+    "language_id": 4,
+    "source_code": "console.log(\"Node.js works! Calculation:\", Math.sqrt(144));"
+  }'
+
+# 5. PostgreSQL 16 query execution (Language ID 8)
+curl -s -X POST "${BASE_URL}/submissions?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}" \
+  -d '{
+    "language_id": 8,
+    "source_code": "SELECT 42 AS answer, current_timestamp AS executed_at;"
+  }'
+
+# 6. MySQL 8.4 query execution (Language ID 9)
+curl -s -X POST "${BASE_URL}/submissions?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}" \
+  -d '{
+    "language_id": 9,
+    "source_code": "SELECT VERSION() AS mysql_version;"
+  }'
+
+# 7. Asynchronous submission (queue & poll)
+SUB_ID=$(curl -s -X POST "${BASE_URL}/submissions" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}" \
+  -d '{"language_id": 5, "source_code": "print(100 * 2)"}' | jq -r '.token')
+
+echo "Queued submission ID: ${SUB_ID}"
+curl -s "${BASE_URL}/submissions/${SUB_ID}" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}"
+
+# 8. Multi-file project submission
+curl -s -X POST "${BASE_URL}/submissions/multi?wait=true" \
+  -H "Content-Type: application/json" \
+  -H "X-Auth-Token: ${AUTH_TOKEN}" \
+  -d '{
+    "language_id": 5,
+    "source_code": "from helper import add\nprint(\"Sum:\", add(20, 22))",
+    "additional_files": {
+      "helper.py": "def add(a, b):\n    return a + b"
+    }
+  }'
+```
+
+---
+
+## 6. Alert Definitions & Operator Runbooks
 
 Alerts are monitored continuously by Prometheus and dispatched via Alertmanager (`alertrules.yml`). When an alert triggers, execute the corresponding runbook action:
 
@@ -147,7 +224,7 @@ Alerts are monitored continuously by Prometheus and dispatched via Alertmanager 
 
 ---
 
-## 6. Security Boundaries & Isolation Architecture
+## 7. Security Boundaries & Isolation Architecture
 
 CoderRunner implements a defense-in-depth security model across five layers:
 
@@ -196,7 +273,7 @@ CoderRunner implements a defense-in-depth security model across five layers:
 
 ---
 
-## 7. Operational Procedures
+## 8. Operational Procedures
 
 ### Health Verification
 
