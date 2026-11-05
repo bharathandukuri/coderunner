@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: docker/executor/Dockerfile
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - NODE_ENV=development
       - REDIS_URL=redis://redis:6379

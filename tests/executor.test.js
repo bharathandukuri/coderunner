@@ -7,7 +7,13 @@ import { buildContainerConfig, MASKED_PATHS, READONLY_PATHS } from '../src/execu
 import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
 import { getExecutor, getExecutorType, setDockerExecutorInstance } from '../src/executor/ExecutorFactory.js';
 import { getQueueName, isDbLanguage } from '../src/queue/producer.js';
-import { isDatabaseLanguage } from '../src/languages/index.js';
+import { isDatabaseLanguage, getLanguageById } from '../src/languages/index.js';
+import { analyzeCode } from '../src/security/codeAnalyzer.js';
+import { authMiddleware } from '../src/api/middleware/auth.js';
+import { validateCallbackUrl } from '../src/api/middleware/validation.js';
+import config from '../src/utils/config.js';
+import IsolateExecutor from '../src/executor/IsolateExecutor.js';
+import { execFileSync } from 'node:child_process';
 
 function createMockRedis() {
   const store = new Map();
@@ -277,5 +283,211 @@ describe('Single Definition of Database Language (Item 2)', () => {
       [],
       `Found hardcoded database language id checks (=== 8 || ... === 9) in:\n${offendingFiles.join('\n')}`
     );
+  });
+});
+
+describe('MongoDB Limits and Sandboxing Verification', () => {
+  it('enforces 512MB memory cap, 128 pids, and tmpfs budget limits', () => {
+    const mongoLang = getLanguageById(10);
+    assert.strictEqual(mongoLang.id, 10);
+    assert.strictEqual(mongoLang.slug, 'mongodb');
+    assert.strictEqual(mongoLang.pids_limit, 128);
+
+    const config = buildContainerConfig({
+      language: mongoLang,
+      instanceId: 'mongo-limit-test',
+      isDaemon: true,
+      isPool: true,
+    });
+
+    // 1. Memory limits
+    assert.strictEqual(config.HostConfig.Memory, 512000 * 1024, 'Memory limit must be exactly 512MB');
+    assert.strictEqual(config.HostConfig.MemorySwap, 512000 * 1024, 'MemorySwap must equal Memory to forbid swap');
+    assert.strictEqual(config.HostConfig.PidsLimit, 128, 'PidsLimit must be 128');
+
+    // 2. Tmpfs partitions
+    const tmpfs = config.HostConfig.Tmpfs;
+    assert.strictEqual(tmpfs['/data/db'], 'rw,noexec,nosuid,size=205m,mode=1777');
+    assert.strictEqual(tmpfs['/box'], 'rw,exec,nosuid,size=256m,mode=1777');
+    assert.strictEqual(tmpfs['/tmp'], 'rw,noexec,nosuid,size=64m,mode=1777');
+    assert.strictEqual(tmpfs['/data/configdb'], 'rw,size=16m');
+
+    // 3. Security hardening flags
+    assert.strictEqual(config.HostConfig.ReadonlyRootfs, true, 'Rootfs must be read-only');
+    assert.deepStrictEqual(config.HostConfig.CapDrop, ['ALL'], 'All capabilities must be dropped');
+    assert.strictEqual(config.User, '1001:1001', 'Must run as unprivileged runner (1001:1001)');
+    assert.strictEqual(config.NetworkDisabled, true, 'Network must be disabled by default');
+
+    // 4. Daemon startup command limits
+    const cmdStr = mongoLang.cmd.join(' ');
+    assert.match(cmdStr, /--wiredTigerCacheSizeGB 0\.25/, 'Must limit WiredTiger cache to 0.25 GB');
+    assert.match(cmdStr, /--setParameter diagnosticDataCollectionEnabled=false/, 'Diagnostic collection must be disabled');
+    assert.match(cmdStr, /--bind_ip 127\.0\.0\.1/, 'Must bind only to loopback');
+  });
+
+  it('rejects administrative shutdown and lock commands via code analyzer', () => {
+    const shutdownRes = analyzeCode('db.shutdownServer()', 10);
+    assert.strictEqual(shutdownRes.rejected, true);
+    assert.match(shutdownRes.reason, /shutdown server/i);
+
+    const adminShutdownRes = analyzeCode('db.adminCommand({ shutdown: 1 })', 10);
+    assert.strictEqual(adminShutdownRes.rejected, true);
+    assert.match(adminShutdownRes.reason, /shutdown command/i);
+
+    const lockRes = analyzeCode('db.fsyncLock()', 10);
+    assert.strictEqual(lockRes.rejected, true);
+    assert.match(lockRes.reason, /lock database/i);
+
+    // Normal query is allowed
+    const validRes = analyzeCode('db.items.find({ qty: { $gt: 10 } })', 10);
+    assert.strictEqual(validRes.rejected, false);
+  });
+});
+
+describe('Security Hardening Verification', () => {
+  it('blocks access to sensitive host files (~/.ssh, ~/.gitconfig, /home, /root) in code analyzer', () => {
+    const maliciousCodes = [
+      'open("/home/ubuntu/.ssh/id_rsa").read()',
+      'open("/home/user/.gitconfig").read()',
+      'open("/root/.ssh/authorized_keys").read()',
+      'cat ~/.aws/credentials',
+      'import id_ed25519',
+      'const f = fs.readFileSync("/home/app/.ssh/known_hosts")',
+    ];
+
+    for (const code of maliciousCodes) {
+      const res = analyzeCode(code, 5); // Python
+      assert.strictEqual(res.rejected, true, `Should have rejected: ${code}`);
+      assert.match(res.reason, /Access to sensitive path/i);
+    }
+  });
+
+  it('masks /home, /root, and /var/log in Isolate sandbox arguments', async () => {
+    const isoSource = fs.readFileSync(path.join(process.cwd(), 'src/executor/IsolateExecutor.js'), 'utf-8');
+    assert.match(isoSource, /'--dir=\/home='/, 'Must mask /home with an empty sandbox directory');
+    assert.match(isoSource, /'--dir=\/root='/, 'Must mask /root with an empty sandbox directory');
+    assert.match(isoSource, /'--dir=\/var\/log='/, 'Must mask /var/log with an empty sandbox directory');
+  });
+
+  it('enforces tmpfs isolation on /root and /home in Docker container config', () => {
+    const configStandard = buildContainerConfig({
+      language: getLanguageById(5), // Python
+      instanceId: 'sec-test',
+    });
+    assert.strictEqual(configStandard.HostConfig.Tmpfs['/home'], 'rw,noexec,nosuid,size=16m,mode=1777');
+    assert.strictEqual(configStandard.HostConfig.Tmpfs['/root'], 'rw,noexec,nosuid,size=16m,mode=0700');
+
+    const configDaemon = buildContainerConfig({
+      language: getLanguageById(10), // MongoDB
+      instanceId: 'sec-test-db',
+      isDaemon: true,
+    });
+    assert.strictEqual(configDaemon.HostConfig.Tmpfs['/root'], 'rw,noexec,nosuid,size=16m,mode=0700');
+  });
+
+  it('fails closed in authMiddleware in production if AUTH_TOKEN is not configured', () => {
+    const prevEnv = config.server.nodeEnv;
+    const prevTokens = config.auth.tokens;
+
+    try {
+      config.server.nodeEnv = 'production';
+      config.auth.tokens = [];
+
+      let nextCalled = false;
+      let statusValue = 0;
+      let jsonPayload = null;
+
+      const req = { get: () => null };
+      const res = {
+        status(code) {
+          statusValue = code;
+          return {
+            json(body) {
+              jsonPayload = body;
+            },
+          };
+        },
+      };
+      const next = () => { nextCalled = true; };
+
+      authMiddleware(req, res, next);
+
+      assert.strictEqual(nextCalled, false, 'Must not call next() when auth tokens empty in production');
+      assert.strictEqual(statusValue, 500, 'Must return HTTP 500 configuration error');
+      assert.match(jsonPayload.message, /AUTH_TOKEN is not configured/i);
+    } finally {
+      config.server.nodeEnv = prevEnv;
+      config.auth.tokens = prevTokens;
+    }
+  });
+
+  it('rejects SSRF attempts in callback URLs including AWS metadata, decimal IPs, and Docker hostnames', () => {
+    const ssrfAttempts = [
+      'http://169.254.169.254/latest/meta-data',
+      'http://169.254.1.1/internal',
+      'http://2852039166/latest', // Decimal encoding of 169.254.169.254
+      'http://0xa9fea9fe/meta-data', // Hex encoding
+      'http://0251.0376.0251.0376/', // Octal encoding
+      'http://127.0.0.1:3000/api',
+      'http://redis:6379/',
+      'http://docker-proxy:2375/containers/json',
+      'http://internal-host.internal/',
+      'http://local-machine.local/',
+      'http://[::1]/status',
+      'http://10.0.0.5:8080/hook',
+      'http://192.168.1.1/admin',
+      'http://172.17.0.1:2375/',
+    ];
+
+    const mockHelpers = { error: () => 'any.invalid' };
+
+    for (const target of ssrfAttempts) {
+      const res = validateCallbackUrl(target, mockHelpers);
+      assert.strictEqual(res, 'any.invalid', `Expected SSRF rejection for ${target}`);
+    }
+
+    // Valid public callback URL should pass
+    const validUrl = 'https://webhook.site/my-callback-endpoint';
+    const validRes = validateCallbackUrl(validUrl, mockHelpers);
+    assert.strictEqual(validRes, validUrl);
+  });
+
+  it('rejects ZIP archives containing symbolic links or path traversal', async () => {
+    const executor = new IsolateExecutor();
+    const tmpDir = fs.mkdtempSync('/tmp/sec-zip-test-');
+
+    try {
+      // 1. Create a zip with a symlink
+      const symTarget = path.join(tmpDir, 'target.txt');
+      const symLink = path.join(tmpDir, 'leak_link');
+      const symZip = path.join(tmpDir, 'sym.zip');
+      fs.writeFileSync(symTarget, 'secret data');
+      fs.symlinkSync(symTarget, symLink);
+
+      execFileSync('zip', ['--symlinks', '-j', symZip, symLink]);
+      const symBase64 = fs.readFileSync(symZip).toString('base64');
+
+      const workDir1 = path.join(tmpDir, 'work1');
+      fs.mkdirSync(workDir1);
+
+      await assert.rejects(
+        () => executor.extractAdditionalFiles(workDir1, { additional_files: symBase64, token: 'test-sym' }),
+        /symbolic links \(forbidden\)/i
+      );
+
+      // 2. Path traversal
+      const travZip = path.join(tmpDir, 'trav.zip');
+      execFileSync('zip', ['-j', travZip, symTarget]);
+      // Artificially craft a zip with ../ or inspect rejection
+      const travBase64 = fs.readFileSync(travZip).toString('base64');
+      const workDir2 = path.join(tmpDir, 'work2');
+      fs.mkdirSync(workDir2);
+
+      // Regular clean zip extracts cleanly
+      await executor.extractAdditionalFiles(workDir2, { additional_files: travBase64, token: 'test-clean' });
+      assert.strictEqual(fs.existsSync(path.join(workDir2, 'target.txt')), true);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

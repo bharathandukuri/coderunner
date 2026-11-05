@@ -66,8 +66,6 @@ services:
       - LANGUAGE_MYSQL_POOL=${LANGUAGE_MYSQL_POOL:-true}
       - LANGUAGE_MONGODB_ENABLED=${LANGUAGE_MONGODB_ENABLED:-false}
       - LANGUAGE_MONGODB_POOL=${LANGUAGE_MONGODB_POOL:-true}
-    ports:
-      - "3000:3000"
     depends_on:
       - redis
     restart: unless-stopped

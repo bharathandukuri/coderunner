@@ -3,6 +3,104 @@ import config from '../../utils/config.js';
 import { isValidLanguageId, isLanguageEnabled, getEnabledLanguages, getLanguageById } from '../../languages/index.js';
 import logger from '../../utils/logger.js';
 
+const BLOCKED_HOSTNAMES = new Set([
+  'localhost',
+  'redis',
+  'docker-proxy',
+  'api',
+  'worker',
+  'worker-db',
+  'caddy',
+  'prometheus',
+  'grafana',
+  'cadvisor',
+  'alertmanager',
+  'node-exporter',
+  'redis-exporter',
+]);
+
+/**
+ * Hardened SSRF validator for callback URLs.
+ * Rejects loopback, private RFC1918, link-local (AWS metadata 169.254.0.0/16),
+ * carrier-grade NAT, non-standard IP encodings (decimal, hex, octal), and Docker services.
+ */
+export function validateCallbackUrl(value, helpers) {
+  if (!value) return value;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return helpers.error('any.invalid');
+    }
+
+    let hostname = url.hostname.toLowerCase();
+    if (hostname.startsWith('[') && hostname.endsWith(']')) {
+      hostname = hostname.slice(1, -1);
+    }
+
+    if (BLOCKED_HOSTNAMES.has(hostname)) {
+      return helpers.error('any.invalid');
+    }
+
+    if (!hostname.includes('.')) {
+      return helpers.error('any.invalid');
+    }
+
+    if (
+      hostname.endsWith('.internal') ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.localhost') ||
+      hostname.endsWith('.lan') ||
+      hostname.endsWith('.home.arpa')
+    ) {
+      return helpers.error('any.invalid');
+    }
+
+    // Decimal, octal, or hex raw integer IP
+    if (/^(0x[0-9a-f]+|\d+)$/i.test(hostname)) {
+      return helpers.error('any.invalid');
+    }
+
+    const parts = hostname.split('.');
+    if (parts.length === 4 && parts.every(p => /^(0x[0-9a-f]+|0[0-7]+|\d+)$/i.test(p))) {
+      const octets = parts.map(p => {
+        if (/^0x/i.test(p)) return parseInt(p, 16);
+        if (/^0\d/.test(p)) return parseInt(p, 8);
+        return parseInt(p, 10);
+      });
+      if (octets.some(o => isNaN(o) || o < 0 || o > 255)) {
+        return helpers.error('any.invalid');
+      }
+      const [o0, o1, o2] = octets;
+      if (o0 === 0) return helpers.error('any.invalid'); // 0.0.0.0/8
+      if (o0 === 10) return helpers.error('any.invalid'); // 10.0.0.0/8
+      if (o0 === 127) return helpers.error('any.invalid'); // 127.0.0.0/8
+      if (o0 === 169 && o1 === 254) return helpers.error('any.invalid'); // 169.254.0.0/16
+      if (o0 === 172 && o1 >= 16 && o1 <= 31) return helpers.error('any.invalid'); // 172.16.0.0/12
+      if (o0 === 192 && o1 === 168) return helpers.error('any.invalid'); // 192.168.0.0/16
+      if (o0 === 100 && o1 >= 64 && o1 <= 127) return helpers.error('any.invalid'); // 100.64.0.0/10
+      if (o0 === 192 && o1 === 0 && o2 === 2) return helpers.error('any.invalid');
+      if (o0 === 198 && o1 === 51 && o2 === 100) return helpers.error('any.invalid');
+      if (o0 === 203 && o1 === 0 && o2 === 113) return helpers.error('any.invalid');
+      if (o0 >= 224) return helpers.error('any.invalid'); // Multicast & reserved
+    }
+
+    if (
+      hostname === '::1' ||
+      hostname === '::' ||
+      hostname.startsWith('fe80:') ||
+      hostname.startsWith('fc') ||
+      hostname.startsWith('fd') ||
+      hostname.startsWith('::ffff:')
+    ) {
+      return helpers.error('any.invalid');
+    }
+
+    return value;
+  } catch {
+    return helpers.error('any.invalid');
+  }
+}
+
 // Run validation schema (single file execution)
 const runSchema = Joi.object({
   source_code: Joi.string().max(config.execution.maxSourceSize).required().messages({
@@ -31,35 +129,7 @@ const runSchema = Joi.object({
   command_line_arguments: Joi.string().allow('', null).default(null),
   redirect_stderr_to_stdout: Joi.boolean().default(false),
   enable_network: Joi.any().strip().default(false),
-  callback_url: Joi.string().uri().allow('', null).default(null).custom((value, helpers) => {
-    if (!value) return value;
-    try {
-      const url = new URL(value);
-      // Block internal/private networks (SSRF protection)
-      const hostname = url.hostname;
-      if (
-        hostname === 'localhost' ||
-        hostname === '127.0.0.1' ||
-        hostname === '::1' ||
-        hostname === '0.0.0.0' ||
-        hostname.startsWith('10.') ||
-        hostname.startsWith('172.') ||
-        hostname.startsWith('192.168.') ||
-        hostname === '169.254.169.254' ||
-        hostname.endsWith('.internal') ||
-        hostname.endsWith('.local')
-      ) {
-        return helpers.error('any.invalid');
-      }
-      // Only allow http/https
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    } catch {
-      return helpers.error('any.invalid');
-    }
-  }),
+  callback_url: Joi.string().uri().allow('', null).default(null).custom(validateCallbackUrl),
   additional_files: Joi.string().allow('', null).default(null),
 });
 
@@ -125,33 +195,7 @@ const multiFileRunSchema = Joi.object({
   compiler_options: Joi.string().allow('', null).default(null),
   redirect_stderr_to_stdout: Joi.boolean().default(false),
   enable_network: Joi.any().strip().default(false),
-  callback_url: Joi.string().uri().allow('', null).default(null).custom((value, helpers) => {
-    if (!value) return value;
-    try {
-      const url = new URL(value);
-      const hostname = url.hostname;
-      if (
-        hostname === 'localhost' ||
-        hostname === '127.0.0.1' ||
-        hostname === '::1' ||
-        hostname === '0.0.0.0' ||
-        hostname.startsWith('10.') ||
-        hostname.startsWith('172.') ||
-        hostname.startsWith('192.168.') ||
-        hostname === '169.254.169.254' ||
-        hostname.endsWith('.internal') ||
-        hostname.endsWith('.local')
-      ) {
-        return helpers.error('any.invalid');
-      }
-      if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-        return helpers.error('any.invalid');
-      }
-      return value;
-    } catch {
-      return helpers.error('any.invalid');
-    }
-  }),
+  callback_url: Joi.string().uri().allow('', null).default(null).custom(validateCallbackUrl),
 });
 
 // Batch multi-file run validation

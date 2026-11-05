@@ -173,8 +173,8 @@ cmd_up() {
   grafana_password=$(grep '^GRAFANA_PASSWORD=' .env | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
   alert_webhook=$(grep '^ALERT_WEBHOOK_URL=' .env | cut -d '=' -f 2- | tr -d '"'\'' ' || true)
 
-  if [ -z "$auth_token" ]; then
-    echo -e "${RED}✗ AUTH_TOKEN is empty in .env. Deploy aborted for security.${NC}" >&2
+  if [ -z "$auth_token" ] || [ "$auth_token" = "your-secret-token" ] || [ "$auth_token" = "dev-token" ] || [ "$auth_token" = "test-token" ]; then
+    echo -e "${RED}✗ AUTH_TOKEN is empty or set to an insecure default in .env. Deploy aborted for security.${NC}" >&2
     exit 1
   fi
 

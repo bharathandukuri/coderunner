@@ -30,6 +30,18 @@ const SENSITIVE_PATHS = [
   /\/dev\/udp/,
   /\/var\/run\/docker\.sock/,
   /\/root\//,
+  /\/home\//,
+  /\.ssh(\/|$)/,
+  /\.git(\/|$)/,
+  /\.gitconfig/,
+  /\.git-credentials/,
+  /\.aws(\/|$)/,
+  /id_rsa/,
+  /id_ed25519/,
+  /id_dsa/,
+  /id_ecdsa/,
+  /authorized_keys/,
+  /known_hosts/,
 ];
 
 // ── C / C++ patterns (language IDs 50, 54) ──────────────────────────────────

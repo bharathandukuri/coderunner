@@ -150,6 +150,9 @@ class IsolateExecutor {
       `--stderr=${sandboxStderr}`,          // sandbox path
       '--dir=/etc:noexec',                 // read-only /etc (Java, Python need it)
       '--dir=/tmp=',                       // writable /tmp
+      '--dir=/home=',                      // empty /home (prevent host user / SSH / Git leaks)
+      '--dir=/root=',                      // empty /root
+      '--dir=/var/log=',                   // empty /var/log
       '--env=PATH=/usr/local/bin:/usr/bin:/bin',
       '--env=HOME=/box',
       '--env=LANG=C.UTF-8',
@@ -232,14 +235,34 @@ class IsolateExecutor {
       const zipBuffer = Buffer.from(submission.additional_files, 'base64');
       await fs.writeFile(tmpZip, zipBuffer);
 
-      // Path traversal check
-      const { stdout: listing } = await execFileAsync('unzip', ['-l', tmpZip]);
-      if (listing.includes('../') || listing.includes('/..')) {
-        throw new Error('ZIP archive contains path traversal entries');
+      // Security checks: detect symlinks and path traversal before extraction
+      const { stdout: shortListing } = await execFileAsync('unzip', ['-Z', '-s', tmpZip]);
+      for (const line of shortListing.split('\n')) {
+        const trimmed = line.trim();
+        if (/^[l]/.test(trimmed)) {
+          throw new Error('ZIP archive contains symbolic links (forbidden)');
+        }
+      }
+
+      const { stdout: nameListing } = await execFileAsync('unzip', ['-Z', '-1', tmpZip]);
+      for (const entry of nameListing.split('\n')) {
+        const trimmed = entry.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('/') || trimmed.startsWith('\\') || trimmed.includes('..')) {
+          throw new Error('ZIP archive contains path traversal entries');
+        }
       }
 
       await execFileAsync('unzip', ['-n', '-qq', tmpZip, '-d', workDir]);
       await fs.unlink(tmpZip);
+
+      // Post-extraction verification: ensure no symlinks were created
+      const entries = await fs.readdir(workDir, { recursive: true, withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) {
+          throw new Error('ZIP archive contains symbolic links (forbidden)');
+        }
+      }
 
       logger.info({
         event: 'additional_files_extracted',

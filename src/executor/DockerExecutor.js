@@ -199,14 +199,19 @@ class DockerExecutor {
 
       await this.writeFileToBox(container, '_additional.zip', zipBuffer);
 
-      // Check for path traversal and extract ZIP inside container
+      // Check for path traversal and symlinks inside container
       const checkResult = await this.runCommand(
         container,
-        'unzip -l /box/_additional.zip | grep -q "\\.\\./\\|/\\.\\." && echo TRAVERSAL_FOUND || echo OK',
+        'unzip -Z -s /box/_additional.zip | grep -q "^[l]" && echo SYMLINK_FOUND || (unzip -l /box/_additional.zip | grep -q "\\.\\./\\|/\\.\\." && echo TRAVERSAL_FOUND || echo OK)',
         null,
         10,
         ''
       );
+
+      if (checkResult.stdout.trim().includes('SYMLINK_FOUND')) {
+        await this.runCommand(container, 'rm /box/_additional.zip', null, 5, '');
+        throw new Error('ZIP archive contains symbolic links (forbidden)');
+      }
 
       if (checkResult.stdout.trim().includes('TRAVERSAL_FOUND')) {
         await this.runCommand(container, 'rm /box/_additional.zip', null, 5, '');

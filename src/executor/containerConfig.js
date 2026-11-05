@@ -83,10 +83,12 @@ export function buildContainerConfig({
     '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
     '/data/db': 'rw,noexec,nosuid,size=205m,mode=1777',
     '/data/configdb': 'rw,size=16m',
+    '/root': 'rw,noexec,nosuid,size=16m,mode=0700',
   } : {
     '/box': `rw,exec,nosuid,size=${boxSize}m,mode=1777`,
     '/tmp': 'rw,noexec,nosuid,size=64m,mode=1777',
     '/home': 'rw,noexec,nosuid,size=16m,mode=1777',
+    '/root': 'rw,noexec,nosuid,size=16m,mode=0700',
   };
 
   const containerConfig = {
