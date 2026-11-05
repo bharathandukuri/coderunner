@@ -123,9 +123,9 @@ Isolate runs processes in Linux namespaces and cgroups directly on the host with
 
 Docker isolates code execution inside short-lived or pooled containers using container runtimes (such as `runc` or `runsc`/gVisor).
 
-- **Setup**: Ensure the Docker daemon is running and the multi-language runner image is built:
+- **Setup**: Ensure the Docker daemon is running and runtime images are built:
   ```bash
-  bash scripts/build-images.sh multi
+  bash scripts/build-images.sh
   ```
 - **Usage**: Set `WORKER_TYPE=docker` in `.env`.
 

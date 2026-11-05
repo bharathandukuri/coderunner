@@ -140,11 +140,6 @@ cmd_build() {
     docker build -t coderunner/mysql:8.4 docker/images/mysql
   fi
 
-  if [ -d docker/images/multi ] && should_build_image "coderunner/multi:latest"; then
-    echo "Building coderunner/multi:latest..."
-    docker build -t coderunner/multi:latest docker/images/multi
-  fi
-
   if [ -d docker/images/mongodb ] && should_build_image "coderunner/mongodb:8.0"; then
     echo "Building coderunner/mongodb:8.0..."
     docker build -t coderunner/mongodb:8.0 docker/images/mongodb

@@ -71,8 +71,6 @@ services:
       - LANGUAGE_MYSQL_POOL=${LANGUAGE_MYSQL_POOL:-true}
       - LANGUAGE_MONGODB_ENABLED=${LANGUAGE_MONGODB_ENABLED:-false}
       - LANGUAGE_MONGODB_POOL=${LANGUAGE_MONGODB_POOL:-true}
-      - LANGUAGE_MULTI_ENABLED=${LANGUAGE_MULTI_ENABLED:-true}
-      - LANGUAGE_MULTI_POOL=${LANGUAGE_MULTI_POOL:-false}
     depends_on:
       - redis
     restart: unless-stopped
@@ -124,8 +122,6 @@ services:
       - LANGUAGE_MYSQL_POOL=${LANGUAGE_MYSQL_POOL:-true}
       - LANGUAGE_MONGODB_ENABLED=${LANGUAGE_MONGODB_ENABLED:-false}
       - LANGUAGE_MONGODB_POOL=${LANGUAGE_MONGODB_POOL:-true}
-      - LANGUAGE_MULTI_ENABLED=${LANGUAGE_MULTI_ENABLED:-true}
-      - LANGUAGE_MULTI_POOL=${LANGUAGE_MULTI_POOL:-false}
     depends_on:
       - redis
     restart: unless-stopped
@@ -212,8 +208,6 @@ services:
       - LANGUAGE_MYSQL_POOL=${LANGUAGE_MYSQL_POOL:-true}
       - LANGUAGE_MONGODB_ENABLED=${LANGUAGE_MONGODB_ENABLED:-false}
       - LANGUAGE_MONGODB_POOL=${LANGUAGE_MONGODB_POOL:-true}
-      - LANGUAGE_MULTI_ENABLED=${LANGUAGE_MULTI_ENABLED:-true}
-      - LANGUAGE_MULTI_POOL=${LANGUAGE_MULTI_POOL:-false}
     depends_on:
       - redis
       - docker-proxy

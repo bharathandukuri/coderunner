@@ -5,7 +5,10 @@ import logger from '../../utils/logger.js';
 
 // Run validation schema (single file execution)
 const runSchema = Joi.object({
-  source_code: Joi.string().max(config.execution.maxSourceSize).required(),
+  source_code: Joi.string().max(config.execution.maxSourceSize).required().messages({
+    'string.empty': 'source_code is required',
+    'any.required': 'source_code is required',
+  }),
   language_id: Joi.number().integer().required().custom((value, helpers) => {
     if (!isValidLanguageId(value)) {
       return helpers.error('any.invalid');

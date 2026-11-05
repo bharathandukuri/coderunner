@@ -8,8 +8,6 @@ import { getStatusById, isDatabaseLanguage } from '../languages/index.js';
 
 const execFileAsync = promisify(execFile);
 
-const MULTI_FILE_LANGUAGE_ID = 89;
-
 // Atomic box-ID counter (0-999). Safe in single-threaded Node.js event loop.
 let nextBoxId = 0;
 function allocateBoxId() {
@@ -48,20 +46,6 @@ class IsolateExecutor {
       // ── Extract additional files (ZIP) ──────────────────────────────
       if (submission.additional_files) {
         await this.extractAdditionalFiles(workDir, submission);
-      }
-
-      // ── Multi-file program: language 89 or ZIP with run script ─────
-      if (language.id === MULTI_FILE_LANGUAGE_ID) {
-        return await this.executeMultiFile(boxId, workDir, submission);
-      }
-      // Detect multi-file mode: empty source_code + additional_files with run script
-      if (!submission.source_code && submission.additional_files) {
-        for (const name of ['run', 'run.sh']) {
-          try {
-            await fs.access(path.join(workDir, name));
-            return await this.executeMultiFile(boxId, workDir, submission);
-          } catch { /* try next */ }
-        }
       }
 
       // ── Compile if needed ───────────────────────────────────────────
@@ -134,83 +118,6 @@ class IsolateExecutor {
         await execFileAsync('isolate', ['--cleanup', `--box-id=${boxId}`, '--cg']);
       } catch { /* ignore */ }
     }
-  }
-
-  /**
-   * Multi-file program (language_id 89): compile + run scripts from ZIP.
-   */
-  async executeMultiFile(boxId, workDir, submission) {
-    // Verify run script exists (check both 'run' and 'run.sh')
-    let runScript = null;
-    for (const name of ['run', 'run.sh']) {
-      try {
-        await fs.access(path.join(workDir, name));
-        runScript = name;
-        break;
-      } catch { /* try next */ }
-    }
-    if (!runScript) {
-      return {
-        status: getStatusById(6),
-        compile_output: 'Multi-file program requires a "run" (or "run.sh") script in the ZIP archive',
-        time: null,
-        wall_time: null,
-        memory: null,
-        stdout: null,
-        stderr: null,
-        exit_code: null,
-        exit_signal: null,
-      };
-    }
-
-    const stdinPath = path.join(workDir, '_stdin.txt');
-
-    // Optional compile step (check both 'compile' and 'compile.sh')
-    let compileScript = null;
-    for (const name of ['compile', 'compile.sh']) {
-      try {
-        await fs.access(path.join(workDir, name));
-        compileScript = name;
-        break;
-      } catch { /* try next */ }
-    }
-
-    if (compileScript) {
-      const compileResult = await this.runIsolate(boxId, workDir, {
-        cmd: `bash /box/${compileScript}`,
-        timeLimit: config.execution.compileCpuTimeLimit,
-        wallTimeLimit: config.execution.compileWallTimeLimit,
-        memoryLimit: Math.max(submission.memory_limit, 512000),
-        processes: submission.max_processes_and_or_threads,
-      });
-
-      if (compileResult.exitCode !== 0 || compileResult.isoStatus) {
-        return {
-          status: getStatusById(6),
-          compile_output: compileResult.stderr || compileResult.stdout || compileResult.message,
-          time: null,
-          wall_time: null,
-          memory: null,
-          stdout: null,
-          stderr: null,
-          exit_code: compileResult.exitCode,
-          exit_signal: compileResult.exitSignal,
-        };
-      }
-    }
-
-    // Run
-    const result = await this.runIsolate(boxId, workDir, {
-      cmd: `bash /box/${runScript}`,
-      stdinFile: stdinPath,
-      timeLimit: submission.cpu_time_limit,
-      wallTimeLimit: submission.wall_time_limit,
-      memoryLimit: submission.memory_limit,
-      processes: submission.max_processes_and_or_threads,
-      fsize: submission.max_file_size || 1024,
-    });
-
-    return this.buildResult(result, submission);
   }
 
   /**

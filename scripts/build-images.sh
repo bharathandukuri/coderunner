@@ -77,11 +77,6 @@ if [ -d "$PROJECT_DIR/docker/images/mysql" ] && should_build "coderunner/mysql:8
   docker build -t coderunner/mysql:8.4 "$PROJECT_DIR/docker/images/mysql/"
 fi
 
-if [ -d "$PROJECT_DIR/docker/images/multi" ] && should_build "coderunner/multi:latest"; then
-  echo "Building Multi-runtime image..."
-  docker build -t coderunner/multi:latest "$PROJECT_DIR/docker/images/multi/"
-fi
-
 if [ -d "$PROJECT_DIR/docker/images/mongodb" ] && should_build "coderunner/mongodb:8.0"; then
   echo "Building MongoDB 8.0 image..."
   docker build -t coderunner/mongodb:8.0 "$PROJECT_DIR/docker/images/mongodb/"

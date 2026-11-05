@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
+import fs from 'node:fs';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   initLanguageConfig,
@@ -124,7 +126,7 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
 
   it('2. Startup fails if no languages are enabled', () => {
     const allDisabled = {};
-    const allLangs = ['c', 'cpp', 'java', 'javascript', 'typescript', 'python', 'sqlite', 'postgresql', 'mysql', 'mongodb', 'multi'];
+    const allLangs = ['c', 'cpp', 'java', 'javascript', 'typescript', 'python', 'sqlite', 'postgresql', 'mysql', 'mongodb'];
     for (const slug of allLangs) {
       allDisabled[`LANGUAGE_${slug.toUpperCase()}_ENABLED`] = 'false';
     }
@@ -356,5 +358,63 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
     const out = execSync('bash scripts/preflight.sh --sizing-only', { encoding: 'utf-8' }).trim();
     assert.match(out, /Host RAM and CPU Sizing/);
     assert.match(out, /min recommended: \d+MB/);
+  });
+
+  it('12. Language 89 removed: submission with language_id 89 returns 422, empty source_code with ZIP returns 422', async () => {
+    const { validateSubmission } = await import('../src/api/middleware/validation.js');
+
+    // 1. Language 89 rejected
+    let res89Status = null;
+    let res89Json = null;
+    const req89 = {
+      body: {
+        source_code: 'print("hello")',
+        language_id: 89,
+      },
+    };
+    const res89 = {
+      status(code) {
+        res89Status = code;
+        return this;
+      },
+      json(data) {
+        res89Json = data;
+        return this;
+      },
+    };
+    validateSubmission(req89, res89, () => {});
+    assert.strictEqual(res89Status, 422, 'Submission with language_id 89 must return 422');
+
+    // 2. Empty source_code with additional_files rejected with 422 ("source_code is required")
+    let resZipStatus = null;
+    let resZipJson = null;
+    const reqZip = {
+      body: {
+        source_code: '',
+        language_id: 5,
+        additional_files: 'UEsDBBQAAAAIAAA=',
+      },
+    };
+    const resZip = {
+      status(code) {
+        resZipStatus = code;
+        return this;
+      },
+      json(data) {
+        resZipJson = data;
+        return this;
+      },
+    };
+    validateSubmission(reqZip, resZip, () => {});
+    assert.strictEqual(resZipStatus, 422, 'Submission with empty source_code must return 422');
+    assert.match(resZipJson.message, /source_code is required/i);
+  });
+
+  it('13. Multi image removed from build and deploy scripts', () => {
+    const buildImagesSrc = fs.readFileSync(path.resolve('scripts/build-images.sh'), 'utf-8');
+    const deploySrc = fs.readFileSync(path.resolve('scripts/deploy.sh'), 'utf-8');
+
+    assert.doesNotMatch(buildImagesSrc, /coderunner\/multi/);
+    assert.doesNotMatch(deploySrc, /coderunner\/multi/);
   });
 });

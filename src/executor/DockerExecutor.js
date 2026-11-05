@@ -7,8 +7,6 @@ import ResultParser from './ResultParser.js';
 import { getWarmPool } from './pool/WarmContainerPool.js';
 import { createDockerClient } from '../utils/dockerClient.js';
 
-const MULTI_FILE_LANGUAGE_ID = 89;
-
 class DockerExecutor {
   constructor(docker, pool) {
     this.docker = docker || createDockerClient();
@@ -57,12 +55,6 @@ class DockerExecutor {
 
         // C5: Pool wait time is not counted against the user's time limit; timers start after acquire
         logger.debug({ event: 'container_acquired_timers_started', token: submission.token });
-
-        if (language.id === MULTI_FILE_LANGUAGE_ID) {
-          // Multi-file program: extract ZIP, then run compile/run scripts
-          await this.copyAdditionalFiles(container, submission);
-          return await this.executeMultiFile(container, submission);
-        }
 
         // Copy source code to container
         await this.copySourceCode(container, submission);
@@ -148,64 +140,6 @@ class DockerExecutor {
         this.pool.release(container);
       }
     }
-  }
-
-  /**
-   * Execute a multi-file program (language_id 89)
-   */
-  async executeMultiFile(container, submission) {
-    // Verify /box/run script exists
-    const checkRun = await this.runCommand(container, 'test -f /box/run', null, 5, '');
-    if (checkRun.exitCode !== 0) {
-      return {
-        status: getStatusById(6), // Compilation Error (used for setup errors)
-        compile_output: 'Multi-file program requires a "run" script in the ZIP archive',
-        time: null,
-        wall_time: null,
-        memory: null,
-        stdout: null,
-        stderr: null,
-        exit_code: null,
-        exit_signal: null,
-      };
-    }
-
-    // If /box/compile exists, run it
-    const checkCompile = await this.runCommand(container, 'test -f /box/compile', null, 5, '');
-    if (checkCompile.exitCode === 0) {
-      const compileResult = await this.runCommand(
-        container,
-        'bash /box/compile',
-        null,
-        submission.cpu_time_limit + submission.cpu_extra_time,
-        ''
-      );
-
-      if (compileResult.exitCode !== 0) {
-        return {
-          status: getStatusById(6), // Compilation Error
-          compile_output: compileResult.stderr || compileResult.stdout,
-          time: null,
-          wall_time: null,
-          memory: null,
-          stdout: null,
-          stderr: null,
-          exit_code: compileResult.exitCode,
-          exit_signal: null,
-        };
-      }
-    }
-
-    // Run the program
-    const result = await this.runCommand(
-      container,
-      'bash /box/run',
-      null,
-      submission.wall_time_limit,
-      submission.stdin
-    );
-
-    return this.resultParser.parse(result, submission);
   }
 
   /**

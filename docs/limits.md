@@ -206,8 +206,6 @@ The table below catalogs every environment variable controlling capacity, concur
 | `LANGUAGE_JAVASCRIPT_POOL`         | `false`                              | Worker     | Maintain warm container pool for JavaScript when running in Docker              |
 | `LANGUAGE_MONGODB_ENABLED`         | `false`                              | Worker/API | Enable execution for MongoDB (`mongodb:8.0`)                                    |
 | `LANGUAGE_MONGODB_POOL`            | `true`                               | Worker     | Maintain warm container pool for MongoDB (when enabled)                         |
-| `LANGUAGE_MULTI_ENABLED`           | `true`                               | Worker/API | Enable execution for multi-file submissions (`multi:latest`)                    |
-| `LANGUAGE_MULTI_POOL`              | `false`                              | Worker     | Maintain warm container pool for multi-file submissions                         |
 | `LANGUAGE_MYSQL_ENABLED`           | `true`                               | Worker/API | Enable execution for MySQL (`mysql:8.4`)                                        |
 | `LANGUAGE_MYSQL_POOL`              | `true`                               | Worker     | Maintain warm container pool for MySQL                                          |
 | `LANGUAGE_POSTGRESQL_ENABLED`      | `true`                               | Worker/API | Enable execution for PostgreSQL (`postgres:16`)                                 |
