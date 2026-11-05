@@ -31,7 +31,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${CADDY_CPUS:-0.25}'
+          cpus: "${CADDY_CPUS:-0.25}"
           memory: ${CADDY_MEMORY:-128M}
           pids: ${CADDY_PIDS_LIMIT:-100}
 
@@ -82,7 +82,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${API_CPUS:-0.5}'
+          cpus: "${API_CPUS:-0.5}"
           memory: ${API_MEMORY:-512M}
           pids: ${API_PIDS_LIMIT:-200}
 
@@ -133,7 +133,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${WORKER_CPUS:-1.5}'
+          cpus: "${WORKER_CPUS:-1.5}"
           memory: ${WORKER_MEMORY:-4G}
           pids: ${WORKER_PIDS_LIMIT:-500}
 
@@ -164,7 +164,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 64M
           pids: ${DOCKER_PROXY_PIDS_LIMIT:-50}
 
@@ -186,7 +186,6 @@ services:
       - MONGODB_POOL_SIZE=${MONGODB_POOL_SIZE:-${WORKER_DB_CONCURRENCY:-2}}
       - RESULT_CACHE_TTL=${RESULT_CACHE_TTL:-1800}
       - PORT=3000
-      - ENABLE_MONGODB=${ENABLE_MONGODB:-false}
       - ENABLE_LANGUAGE_POOL=${ENABLE_LANGUAGE_POOL:-false}
       - LANGUAGE_C_ENABLED=${LANGUAGE_C_ENABLED:-true}
       - LANGUAGE_C_POOL=${LANGUAGE_C_POOL:-false}
@@ -220,7 +219,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${WORKER_DB_CPUS:-1.5}'
+          cpus: "${WORKER_DB_CPUS:-1.5}"
           memory: ${WORKER_DB_MEMORY:-2G}
           pids: ${WORKER_DB_PIDS_LIMIT:-300}
 
@@ -238,7 +237,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${REDIS_CPUS:-0.25}'
+          cpus: "${REDIS_CPUS:-0.25}"
           memory: ${REDIS_MEMORY:-384M}
           pids: ${WORKER_DB_PIDS_LIMIT:-300}
 
@@ -251,9 +250,9 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--path.rootfs=/rootfs'
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -263,7 +262,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.2'
+          cpus: "0.2"
           memory: 128M
           pids: ${NODE_EXPORTER_PIDS_LIMIT:-50}
 
@@ -286,7 +285,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.3'
+          cpus: "0.3"
           memory: 256M
           pids: ${CADVISOR_PIDS_LIMIT:-100}
 
@@ -306,7 +305,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.2'
+          cpus: "0.2"
           memory: 128M
           pids: ${REDIS_EXPORTER_PIDS_LIMIT:-50}
 
@@ -316,8 +315,8 @@ services:
     environment:
       - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
     command:
-      - '--config.file=/tmp/alertmanager.yml'
-      - '--storage.path=/alertmanager'
+      - "--config.file=/tmp/alertmanager.yml"
+      - "--storage.path=/alertmanager"
     entrypoint:
       - /bin/sh
       - -c
@@ -341,7 +340,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
+          cpus: "0.25"
           memory: 128M
           pids: ${ALERTMANAGER_PIDS_LIMIT:-100}
 
@@ -356,9 +355,9 @@ services:
     volumes:
       - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}"
     depends_on:
       - alertmanager
     restart: unless-stopped
@@ -370,7 +369,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${PROMETHEUS_CPUS:-0.25}'
+          cpus: "${PROMETHEUS_CPUS:-0.25}"
           memory: ${PROMETHEUS_MEMORY:-512M}
           pids: ${PROMETHEUS_PIDS_LIMIT:-200}
 
@@ -397,7 +396,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${GRAFANA_CPUS:-0.25}'
+          cpus: "${GRAFANA_CPUS:-0.25}"
           memory: ${GRAFANA_MEMORY:-256M}
           pids: ${GRAFANA_PIDS_LIMIT:-200}
 
