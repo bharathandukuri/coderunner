@@ -8,15 +8,10 @@ import {
   _resetLanguageConfig,
   isLanguageEnabled,
   getLanguagePoolFlag,
-  getEnabledLanguages,
   describeLanguagePlan,
-  getActiveLanguages,
-  getLanguageById,
-  getStatusById,
 } from '../src/languages/index.js';
 import { validateRun, validateBatchRun } from '../src/api/middleware/validation.js';
 import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
-import { getExecutor, _resetExecutor } from '../src/executor/ExecutorFactory.js';
 import { processJob } from '../src/queue/worker.js';
 import metrics, { recordPoolBootDuration, recordPoolAcquireWait } from '../src/api/metrics.js';
 
@@ -365,7 +360,6 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
 
     // 1. Language 89 rejected
     let res89Status = null;
-    let res89Json = null;
     const req89 = {
       body: {
         source_code: 'print("hello")',
@@ -377,8 +371,7 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
         res89Status = code;
         return this;
       },
-      json(data) {
-        res89Json = data;
+      json() {
         return this;
       },
     };

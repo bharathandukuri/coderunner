@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { splitPostgresStatements } = require('../docker/images/postgres/splitter.js');
+const { splitPostgresStatements, stripCommentsAndLiterals } = require('../docker/images/postgres/splitter.js');
 const { splitMySQLStatements } = require('../docker/images/mysql/splitter.js');
 
 describe('SQL Statement Splitter Unit Tests (Section D)', () => {
@@ -125,9 +125,6 @@ describe('SQL Statement Splitter Unit Tests (Section D)', () => {
   });
 
   describe('PostgreSQL stripCommentsAndLiterals & Cursor Eligibility (Section 2)', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { stripCommentsAndLiterals } = require('../docker/images/postgres/splitter.js');
-
     it('strips strings, dollar quotes, and comments to reveal underlying SQL commands', () => {
       const sql = `
         /* comment with INSERT */

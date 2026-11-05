@@ -10,7 +10,7 @@
     "worker": "node src/queue/worker.js",
     "test": "node --test tests/**/*.test.js",
     "doc-check": "bash scripts/dev/check-docs.sh",
-    "lint": "eslint src/"
+    "lint": "eslint src/ tests/"
   },
   "keywords": [
     "code-execution",

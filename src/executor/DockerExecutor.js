@@ -1,6 +1,4 @@
-import Docker from 'dockerode';
 import { PassThrough } from 'stream';
-import config from '../utils/config.js';
 import logger from '../utils/logger.js';
 import { getStatusById, isDatabaseLanguage } from '../languages/index.js';
 import ResultParser from './ResultParser.js';

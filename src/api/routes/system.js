@@ -2,11 +2,10 @@ import { Router } from 'express';
 import os from 'os';
 import { getAllStatuses, describeLanguagePlan } from '../../languages/index.js';
 import { getQueueStats, getWorkerStats } from '../../queue/producer.js';
-import { getSystemCapabilities, getExecutorType } from '../../executor/ExecutorFactory.js';
+import { getSystemCapabilities } from '../../executor/ExecutorFactory.js';
 import config from '../../utils/config.js';
 
 const router = Router();
-const startTime = Date.now();
 
 /**
  * GET /statuses

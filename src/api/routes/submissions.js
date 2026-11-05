@@ -397,7 +397,6 @@ router.post('/multi/batch', submissionsRateLimitMiddleware, backpressureMiddlewa
       const language = getLanguageById(data.language_id);
       const isDatabase = language?.category === 'database';
       const rootTimeLimit = data.time_limit ?? data.timelimit;
-      const defaultMemory = isDatabase ? null : config.execution.defaultMemoryLimit;
 
       let totalWallBudget = 0;
       const executions = data.executions.map(e => {
@@ -475,7 +474,6 @@ router.post('/multi', submissionsRateLimitMiddleware, backpressureMiddleware, va
     const language = getLanguageById(data.language_id);
     const isDatabase = language?.category === 'database';
     const rootTimeLimit = data.time_limit ?? data.timelimit;
-    const defaultMemory = isDatabase ? null : config.execution.defaultMemoryLimit;
     const maxTotalWallTime = config.execution.maxTotalWallTimeLimit || 60;
 
     let totalWallBudget = 0;

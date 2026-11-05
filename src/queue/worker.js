@@ -202,7 +202,7 @@ export async function startWorker(options = {}) {
       removeOnFail: { count: 1000 },
     });
 
-    w.on('completed', (job, result) => {
+    w.on('completed', (job) => {
       logger.debug({
         event: 'worker_job_completed',
         queue: queueName,

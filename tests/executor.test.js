@@ -30,24 +30,6 @@ function createMockRedis() {
 
 describe('DockerExecutor and containerConfig Unit Tests (Section C)', () => {
   it('C1. Deadline leak: slow acquire resolves after overall deadline, container is released immediately', async () => {
-    let releasedContainer = null;
-    const mockContainer = { id: 'slow-c1' };
-
-    const mockPool = {
-      acquire: async () => {
-        await new Promise(r => setTimeout(r, 60));
-        return mockContainer;
-      },
-      release: async (c) => {
-        releasedContainer = c;
-      },
-    };
-
-    const executor = new DockerExecutor({}, mockPool);
-
-    // Run execute with a mock deadline timeout that expires in 10ms
-    const originalSetTimeout = global.setTimeout;
-    // Instead of overriding global setTimeout, we can test doExecute with expired deadline:
     let deadlineExpired = true;
     let released = null;
     const mockAcquired = { id: 'container-leak-test' };
@@ -84,10 +66,6 @@ describe('DockerExecutor and containerConfig Unit Tests (Section C)', () => {
 
     const executor = new DockerExecutor({}, mockPool);
 
-    // Mock overallDeadline to fire before acquire completes
-    const origSetTimeout = global.setTimeout;
-    let deadlineCallback = null;
-
     // Run execute
     const executePromise = executor.execute({
       token: 'token-c1',
@@ -101,6 +79,7 @@ describe('DockerExecutor and containerConfig Unit Tests (Section C)', () => {
 
     // When deadline expired or execution error occurred, container must not be leaked
     assert(result);
+    assert(released, 'Container should be released immediately upon late acquisition');
   });
 
   it('C3. buildContainerConfig ensures identical hardening and effective memory', () => {

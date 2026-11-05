@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 const BASE_URL = process.env.API_URL || 'http://localhost:3000';
