@@ -347,7 +347,7 @@ services:
     profiles: ["monitoring"]
     image: prom/prometheus:v2.54.1
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./alertrules.yml:/etc/prometheus/alertrules.yml:ro
