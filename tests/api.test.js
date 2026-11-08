@@ -1101,7 +1101,7 @@ describe('CodeRunner API', () => {
     });
   });
 
-  describe('MongoDB Execution (Language ID: 10)', { skip: process.env.ENABLE_MONGODB !== 'true' }, () => {
+  describe('MongoDB Execution (Language ID: 10)', { skip: process.env.LANGUAGE_MONGODB_ENABLED !== 'true' }, () => {
     it('executes single-file MongoDB query (insert then find)', async () => {
       const res = await fetch(`${BASE_URL}/submissions?wait=true`, {
         method: 'POST',

@@ -1506,15 +1506,16 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
   });
 
   it('34. MongoDB opt-in and safe defaults: pool creation, validation 422, languages visibility, and preflight arithmetic', async () => {
-    const { getActiveLanguages, getAllLanguages } = await import('../src/languages/index.js');
+    const { getActiveLanguages, getAllLanguages, initLanguageConfig } = await import('../src/languages/index.js');
     const { validateRun } = await import('../src/api/middleware/validation.js');
     const { execSync } = await import('node:child_process');
 
-    const origEnv = process.env.ENABLE_MONGODB;
+    const origEnv = process.env.LANGUAGE_MONGODB_ENABLED;
 
     try {
       // 1. Disabled by default
-      process.env.ENABLE_MONGODB = 'false';
+      process.env.LANGUAGE_MONGODB_ENABLED = 'false';
+      initLanguageConfig(process.env, true);
       const mockDocker = createMockDocker();
       const mockRedis = createMockRedis();
 
@@ -1557,7 +1558,8 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       assert.match(jsonCalled.message, /MongoDB \(language_id: 10\) is disabled/);
 
       // 4. Enabled: creates pool with right size and validates MONGODB_POOL_SIZE >= 1
-      process.env.ENABLE_MONGODB = 'true';
+      process.env.LANGUAGE_MONGODB_ENABLED = 'true';
+      initLanguageConfig(process.env, true);
       const enabledPool = new WarmContainerPool(mockDocker, {
         redis: mockRedis,
         concurrency: 3,
@@ -1585,7 +1587,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
 
       // 5. Preflight arithmetic with and without Mongo (hermetic via --sizing-only)
       const preflightNoMongo = execSync(
-        'ENABLE_MONGODB=false WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 bash scripts/preflight.sh --sizing-only',
+        'LANGUAGE_MONGODB_ENABLED=false WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 LANGUAGE_POSTGRESQL_POOL_SIZE=2 LANGUAGE_MYSQL_POOL_SIZE=2 bash scripts/preflight.sh --sizing-only',
         { encoding: 'utf-8' }
       );
       assert.match(preflightNoMongo, /min recommended: \d+MB/);
@@ -1593,7 +1595,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       const memNoMongo = parseInt(matchNoMongo[1], 10);
 
       const preflightWithMongo = execSync(
-        'ENABLE_MONGODB=true WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 POSTGRES_POOL_SIZE=2 MYSQL_POOL_SIZE=2 MONGODB_POOL_SIZE=2 bash scripts/preflight.sh --sizing-only',
+        'LANGUAGE_MONGODB_ENABLED=true WORKER_CONCURRENCY=2 WORKER_DB_CONCURRENCY=2 LANGUAGE_POSTGRESQL_POOL_SIZE=2 LANGUAGE_MYSQL_POOL_SIZE=2 LANGUAGE_MONGODB_POOL_SIZE=2 bash scripts/preflight.sh --sizing-only',
         { encoding: 'utf-8' }
       );
       assert.match(preflightWithMongo, /min recommended: \d+MB/);
@@ -1603,7 +1605,9 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       // Sizing with Mongo enabled must be strictly greater than without Mongo
       assert(memWithMongo > memNoMongo, `Memory with Mongo (${memWithMongo}MB) must exceed memory without Mongo (${memNoMongo}MB)`);
     } finally {
-      process.env.ENABLE_MONGODB = origEnv;
+      if (origEnv !== undefined) process.env.LANGUAGE_MONGODB_ENABLED = origEnv;
+      else delete process.env.LANGUAGE_MONGODB_ENABLED;
+      initLanguageConfig(process.env, true);
     }
   });
 
@@ -1635,7 +1639,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       let failed = false;
       try {
         execSync(
-          `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh --check-image-only`,
+          `PATH="${tempBinDir}:$PATH" LANGUAGE_MONGODB_ENABLED=true bash scripts/preflight.sh --check-image-only`,
           { encoding: 'utf-8', stdio: 'pipe' }
         );
       } catch (err) {
@@ -1654,7 +1658,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
       );
 
       const passOutput = execSync(
-        `PATH="${tempBinDir}:$PATH" ENABLE_MONGODB=true bash scripts/preflight.sh --check-image-only`,
+        `PATH="${tempBinDir}:$PATH" LANGUAGE_MONGODB_ENABLED=true bash scripts/preflight.sh --check-image-only`,
         { encoding: 'utf-8', stdio: 'pipe' }
       );
       assert.match(passOutput, /Checking local MongoDB image \(coderunner\/mongodb:8.0\)\.\.\. .*✓ \(found locally\)/);

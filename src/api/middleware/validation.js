@@ -215,9 +215,10 @@ export function validateRun(req, res, next) {
     if (isValidLanguageId(req.body.language_id) && !isLanguageEnabled(req.body.language_id)) {
       const lang = getLanguageById(req.body.language_id);
       const langName = lang?.name ? lang.name.split(' (')[0] : 'Language';
+      const enableVar = `LANGUAGE_${lang?.slug ? lang.slug.toUpperCase() : 'UNKNOWN'}_ENABLED=true`;
       return res.status(422).json({
         error: 'Language is disabled',
-        message: `${langName} (language_id: ${req.body.language_id}) is disabled. Set ENABLE_MONGODB=true to enable it.`,
+        message: `${langName} (language_id: ${req.body.language_id}) is disabled. Set ${enableVar} to enable it.`,
         language_id: req.body.language_id,
         enabled_languages: getEnabledLanguages().map(l => l.slug),
       });
@@ -307,9 +308,10 @@ export function validateMultiRun(req, res, next) {
     if (isValidLanguageId(req.body.language_id) && !isLanguageEnabled(req.body.language_id)) {
       const lang = getLanguageById(req.body.language_id);
       const langName = lang?.name ? lang.name.split(' (')[0] : 'Language';
+      const enableVar = `LANGUAGE_${lang?.slug ? lang.slug.toUpperCase() : 'UNKNOWN'}_ENABLED=true`;
       return res.status(422).json({
         error: 'Language is disabled',
-        message: `${langName} (language_id: ${req.body.language_id}) is disabled. Set ENABLE_MONGODB=true to enable it.`,
+        message: `${langName} (language_id: ${req.body.language_id}) is disabled. Set ${enableVar} to enable it.`,
         language_id: req.body.language_id,
         enabled_languages: getEnabledLanguages().map(l => l.slug),
       });

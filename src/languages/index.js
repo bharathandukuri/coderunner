@@ -48,16 +48,26 @@ export function initLanguageConfig(env = process.env, force = false) {
     throw new Error('ENABLE_LANGUAGE_POOL is not supported. Use per-language variables like LANGUAGE_<SLUG>_POOL and LANGUAGE_<SLUG>_POOL_SIZE instead.');
   }
 
+  if (env.ENABLE_MONGODB !== undefined) {
+    throw new Error('ENABLE_MONGODB is not supported. Use LANGUAGE_MONGODB_ENABLED instead.');
+  }
+
+  if (env.POSTGRES_POOL_SIZE !== undefined) {
+    throw new Error('POSTGRES_POOL_SIZE is not supported. Use LANGUAGE_POSTGRESQL_POOL_SIZE instead.');
+  }
+
+  if (env.MYSQL_POOL_SIZE !== undefined) {
+    throw new Error('MYSQL_POOL_SIZE is not supported. Use LANGUAGE_MYSQL_POOL_SIZE instead.');
+  }
+
+  if (env.MONGODB_POOL_SIZE !== undefined) {
+    throw new Error('MONGODB_POOL_SIZE is not supported. Use LANGUAGE_MONGODB_POOL_SIZE instead.');
+  }
+
   const enabledMap = new Map();
   const poolMap = new Map();
   const poolSizeMap = new Map();
   const warnings = [];
-
-  let deprecatedMongoAlias = undefined;
-  if (env.ENABLE_MONGODB !== undefined && env.ENABLE_MONGODB !== '') {
-    deprecatedMongoAlias = parseBooleanStrict(env.ENABLE_MONGODB, 'ENABLE_MONGODB');
-    warnings.push('ENABLE_MONGODB is deprecated; use LANGUAGE_MONGODB_ENABLED');
-  }
 
   for (const lang of languagesList) {
     const slugUpper = lang.slug.toUpperCase();
@@ -70,8 +80,6 @@ export function initLanguageConfig(env = process.env, force = false) {
     const rawEnabled = env[enabledVar];
     if (rawEnabled !== undefined && rawEnabled !== '') {
       enabled = parseBooleanStrict(rawEnabled, enabledVar);
-    } else if (lang.slug === 'mongodb' && deprecatedMongoAlias !== undefined) {
-      enabled = deprecatedMongoAlias;
     } else {
       enabled = lang.slug !== 'mongodb'; // default true, except mongodb = false
     }
@@ -98,32 +106,18 @@ export function initLanguageConfig(env = process.env, force = false) {
 
     // 3. Resolve Pool Size
     let poolSize = undefined;
-    let rawPoolSize = env[poolSizeVar];
-    let usedPoolSizeVar = poolSizeVar;
-
-    if ((rawPoolSize === undefined || rawPoolSize === '') && isDb) {
-      if (lang.slug === 'postgresql' && env.POSTGRES_POOL_SIZE !== undefined && env.POSTGRES_POOL_SIZE !== '') {
-        rawPoolSize = env.POSTGRES_POOL_SIZE;
-        usedPoolSizeVar = 'POSTGRES_POOL_SIZE';
-      } else if (lang.slug === 'mysql' && env.MYSQL_POOL_SIZE !== undefined && env.MYSQL_POOL_SIZE !== '') {
-        rawPoolSize = env.MYSQL_POOL_SIZE;
-        usedPoolSizeVar = 'MYSQL_POOL_SIZE';
-      } else if (lang.slug === 'mongodb' && env.MONGODB_POOL_SIZE !== undefined && env.MONGODB_POOL_SIZE !== '') {
-        rawPoolSize = env.MONGODB_POOL_SIZE;
-        usedPoolSizeVar = 'MONGODB_POOL_SIZE';
-      }
-    }
+    const rawPoolSize = env[poolSizeVar];
 
     if (rawPoolSize !== undefined && rawPoolSize !== '') {
       const parsedSize = Number(rawPoolSize);
       if (!Number.isInteger(parsedSize) || parsedSize < 1) {
-        throw new Error(`${usedPoolSizeVar} must be an integer >= 1, got ${rawPoolSize}`);
+        throw new Error(`${poolSizeVar} must be an integer >= 1, got ${rawPoolSize}`);
       }
       poolSize = parsedSize;
     }
 
     if (poolSize !== undefined && (!enabled || !pool)) {
-      warnings.push(`POOL_SIZE set for ${lang.slug} (${usedPoolSizeVar}) where pool is not enabled`);
+      warnings.push(`POOL_SIZE set for ${lang.slug} (${poolSizeVar}) where pool is not enabled`);
     }
 
     enabledMap.set(lang.id, enabled);

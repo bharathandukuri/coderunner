@@ -123,6 +123,34 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
       }, true);
     }, /ENABLE_LANGUAGE_POOL is not supported/);
 
+    // ENABLE_MONGODB is rejected with helpful message
+    assert.throws(() => {
+      initLanguageConfig({
+        ENABLE_MONGODB: 'true',
+      }, true);
+    }, /ENABLE_MONGODB is not supported/);
+
+    // POSTGRES_POOL_SIZE is rejected with helpful message
+    assert.throws(() => {
+      initLanguageConfig({
+        POSTGRES_POOL_SIZE: '4',
+      }, true);
+    }, /POSTGRES_POOL_SIZE is not supported/);
+
+    // MYSQL_POOL_SIZE is rejected with helpful message
+    assert.throws(() => {
+      initLanguageConfig({
+        MYSQL_POOL_SIZE: '4',
+      }, true);
+    }, /MYSQL_POOL_SIZE is not supported/);
+
+    // MONGODB_POOL_SIZE is rejected with helpful message
+    assert.throws(() => {
+      initLanguageConfig({
+        MONGODB_POOL_SIZE: '4',
+      }, true);
+    }, /MONGODB_POOL_SIZE is not supported/);
+
     // Reset to defaults
     _resetLanguageConfig();
     initLanguageConfig(process.env, true);

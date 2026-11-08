@@ -41,8 +41,7 @@ export class WarmContainerPool {
     const rawPg = cleanVal(options.postgresPoolSize)
       ?? cleanVal(options.languagePoolSizes?.postgresql)
       ?? cleanVal(options.postgresqlPoolSize)
-      ?? cleanVal(process.env.LANGUAGE_POSTGRESQL_POOL_SIZE)
-      ?? cleanVal(process.env.POSTGRES_POOL_SIZE);
+      ?? cleanVal(process.env.LANGUAGE_POSTGRESQL_POOL_SIZE);
     if (rawPg !== undefined) {
       const parsedPg = Number(rawPg);
       if (!Number.isInteger(parsedPg) || parsedPg < 1) {
@@ -56,8 +55,7 @@ export class WarmContainerPool {
     const rawMy = cleanVal(options.mysqlPoolSize)
       ?? cleanVal(options.languagePoolSizes?.mysql)
       ?? cleanVal(options.mysqlPoolSize)
-      ?? cleanVal(process.env.LANGUAGE_MYSQL_POOL_SIZE)
-      ?? cleanVal(process.env.MYSQL_POOL_SIZE);
+      ?? cleanVal(process.env.LANGUAGE_MYSQL_POOL_SIZE);
     if (rawMy !== undefined) {
       const parsedMy = Number(rawMy);
       if (!Number.isInteger(parsedMy) || parsedMy < 1) {
@@ -71,15 +69,14 @@ export class WarmContainerPool {
     const rawMongo = cleanVal(options.mongodbPoolSize)
       ?? cleanVal(options.languagePoolSizes?.mongodb)
       ?? cleanVal(options.mongodbPoolSize)
-      ?? cleanVal(process.env.LANGUAGE_MONGODB_POOL_SIZE)
-      ?? cleanVal(process.env.MONGODB_POOL_SIZE);
+      ?? cleanVal(process.env.LANGUAGE_MONGODB_POOL_SIZE);
     if (rawMongo !== undefined) {
       const parsedMongo = Number(rawMongo);
       if (!Number.isInteger(parsedMongo) || parsedMongo < 1) {
         throw new Error(`MONGODB_POOL_SIZE must be an integer >= 1, got ${rawMongo}`);
       }
       this.mongodbPoolSize = parsedMongo;
-    } else if (cleanVal(options.postgresPoolSize) !== undefined && cleanVal(options.mysqlPoolSize) !== undefined && cleanVal(options.mongodbPoolSize) === undefined && cleanVal(process.env.MONGODB_POOL_SIZE) === undefined && cleanVal(process.env.LANGUAGE_MONGODB_POOL_SIZE) === undefined) {
+    } else if (cleanVal(options.postgresPoolSize) !== undefined && cleanVal(options.mysqlPoolSize) !== undefined && cleanVal(options.mongodbPoolSize) === undefined && cleanVal(process.env.LANGUAGE_MONGODB_POOL_SIZE) === undefined) {
       this.mongodbPoolSize = Number(options.postgresPoolSize);
     } else {
       this.mongodbPoolSize = baseConcurrency;
@@ -116,7 +113,7 @@ export class WarmContainerPool {
 
     const enableMongo = options.enableMongodb !== undefined
       ? Boolean(options.enableMongodb)
-      : process.env.ENABLE_MONGODB === 'true';
+      : isLanguageEnabled('mongodb');
     this.enableMongodb = enableMongo;
 
     this.pools = {};
@@ -278,7 +275,7 @@ export class WarmContainerPool {
     }
     if (lang.slug === 'mongodb') {
       if (this.options?.enableMongodb !== undefined) return Boolean(this.options.enableMongodb);
-      if (process.env.ENABLE_MONGODB === 'true' || process.env.LANGUAGE_MONGODB_ENABLED === 'true') return true;
+      if (process.env.LANGUAGE_MONGODB_ENABLED === 'true') return true;
     }
     return isLanguageEnabled(lang);
   }
@@ -294,7 +291,7 @@ export class WarmContainerPool {
     }
     if (lang.slug === 'mongodb') {
       if (this.options?.enableMongodb !== undefined) return Boolean(this.options.enableMongodb);
-      if (process.env.ENABLE_MONGODB === 'true' || process.env.LANGUAGE_MONGODB_POOL === 'true') return true;
+      if (process.env.LANGUAGE_MONGODB_POOL === 'true') return true;
     }
     if (!isDatabaseLanguage(lang) && this.options?.enableLanguagePool !== undefined) {
       return Boolean(this.options.enableLanguagePool);
