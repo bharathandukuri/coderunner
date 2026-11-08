@@ -212,10 +212,10 @@ The table below catalogs every environment variable controlling capacity, concur
 | `LANGUAGE_MONGODB_POOL_SIZE`       | `WORKER_DB_CONCURRENCY`              | Worker     | Target idle warm container depth for MongoDB (when pool enabled)                |
 | `LANGUAGE_MYSQL_ENABLED`           | `true`                               | Worker/API | Enable execution for MySQL (`mysql:8.4`)                                        |
 | `LANGUAGE_MYSQL_POOL`              | `true`                               | Worker     | Maintain warm container pool for MySQL                                          |
-| `LANGUAGE_MYSQL_POOL_SIZE`         | `2`                                  | Worker     | Target idle warm container depth for MySQL (when pool enabled)                  |
+| `LANGUAGE_MYSQL_POOL_SIZE`         | `WORKER_DB_CONCURRENCY`              | Worker     | Target idle warm container depth for MySQL (when pool enabled)                  |
 | `LANGUAGE_POSTGRESQL_ENABLED`      | `true`                               | Worker/API | Enable execution for PostgreSQL (`postgres:16`)                                 |
 | `LANGUAGE_POSTGRESQL_POOL`         | `true`                               | Worker     | Maintain warm container pool for PostgreSQL                                     |
-| `LANGUAGE_POSTGRESQL_POOL_SIZE`    | `2`                                  | Worker     | Target idle warm container depth for PostgreSQL (when pool enabled)             |
+| `LANGUAGE_POSTGRESQL_POOL_SIZE`    | `WORKER_DB_CONCURRENCY`              | Worker     | Target idle warm container depth for PostgreSQL (when pool enabled)             |
 | `LANGUAGE_PYTHON_ENABLED`          | `true`                               | Worker/API | Enable execution for Python (`python:3.8`)                                      |
 | `LANGUAGE_PYTHON_POOL`             | `false`                              | Worker     | Maintain warm container pool for Python when running in Docker                  |
 | `LANGUAGE_PYTHON_POOL_SIZE`        | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for Python (when pool enabled)                 |

@@ -129,6 +129,13 @@ elif [ "${LANGUAGE_MONGODB_ENABLED:-}" = "false" ]; then
   ENABLE_MONGO=false
 fi
 
+# Environment variable overrides
+if [ -n "${WORKER_CONCURRENCY:-}" ]; then W_CONCURRENCY="$WORKER_CONCURRENCY"; fi
+if [ -n "${WORKER_DB_CONCURRENCY:-}" ]; then W_DB_CONCURRENCY="$WORKER_DB_CONCURRENCY"; fi
+if [ -n "${LANGUAGE_POSTGRESQL_POOL_SIZE:-}" ]; then PG_POOL="$LANGUAGE_POSTGRESQL_POOL_SIZE"; fi
+if [ -n "${LANGUAGE_MYSQL_POOL_SIZE:-}" ]; then MY_POOL="$LANGUAGE_MYSQL_POOL_SIZE"; fi
+if [ -n "${LANGUAGE_MONGODB_POOL_SIZE:-}" ]; then MONGO_POOL="$LANGUAGE_MONGODB_POOL_SIZE"; fi
+
 # Fallback defaults for empty values
 W_CONCURRENCY=${W_CONCURRENCY:-2}
 W_DB_CONCURRENCY=${W_DB_CONCURRENCY:-2}
@@ -153,7 +160,11 @@ else
   MY_MEM=$(( (MY_POOL + W_DB_CONCURRENCY) * 280 ))
   MONGO_MEM=0
   if [ "$ENABLE_MONGO" = "true" ]; then
-    MONGO_MEM=$(( (MONGO_POOL + W_DB_CONCURRENCY) * 250 ))
+    MONGO_P=${MONGO_POOL:-0}
+    if [ "$MONGO_P" -le 0 ]; then
+      MONGO_P=$W_CONCURRENCY
+    fi
+    MONGO_MEM=$(( (MONGO_P * 90) + (W_DB_CONCURRENCY * 512) ))
   fi
   ISO_MEM=$(( W_CONCURRENCY * 250 ))
   MEM_MIN_RECOMMENDED=$(( BASE_MEM + OS_RESERVE + PG_MEM + MY_MEM + MONGO_MEM + ISO_MEM ))

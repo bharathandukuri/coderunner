@@ -275,7 +275,6 @@ export class WarmContainerPool {
     }
     if (lang.slug === 'mongodb') {
       if (this.options?.enableMongodb !== undefined) return Boolean(this.options.enableMongodb);
-      if (process.env.LANGUAGE_MONGODB_ENABLED === 'true') return true;
     }
     return isLanguageEnabled(lang);
   }
@@ -291,7 +290,6 @@ export class WarmContainerPool {
     }
     if (lang.slug === 'mongodb') {
       if (this.options?.enableMongodb !== undefined) return Boolean(this.options.enableMongodb);
-      if (process.env.LANGUAGE_MONGODB_POOL === 'true') return true;
     }
     if (!isDatabaseLanguage(lang) && this.options?.enableLanguagePool !== undefined) {
       return Boolean(this.options.enableLanguagePool);
@@ -352,10 +350,11 @@ export class WarmContainerPool {
         throw new Error(`concurrency must be an integer >= 1, got ${options.concurrency}`);
       }
     }
-    if (options.postgresPoolSize !== undefined) {
-      const parsed = Number(options.postgresPoolSize);
+    const optPg = options.postgresqlPoolSize !== undefined ? options.postgresqlPoolSize : options.postgresPoolSize;
+    if (optPg !== undefined) {
+      const parsed = Number(optPg);
       if (!Number.isInteger(parsed) || parsed < 1) {
-        throw new Error(`POSTGRES_POOL_SIZE must be an integer >= 1, got ${options.postgresPoolSize}`);
+        throw new Error(`POSTGRES_POOL_SIZE must be an integer >= 1, got ${optPg}`);
       }
       this.postgresPoolSize = parsed;
       if (this.pools[8]) this.pools[8].targetPoolSize = this.postgresPoolSize;
