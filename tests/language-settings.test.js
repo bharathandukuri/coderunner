@@ -15,6 +15,7 @@ import { validateRun, validateBatchRun } from '../src/api/middleware/validation.
 import { WarmContainerPool } from '../src/executor/pool/WarmContainerPool.js';
 import { processJob } from '../src/queue/worker.js';
 import metrics, { recordPoolBootDuration, recordPoolAcquireWait } from '../src/api/metrics.js';
+import config from '../src/utils/config.js';
 
 class MockStream extends EventEmitter {
   resume() {}
@@ -354,6 +355,19 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
     const sizingOut = execSync('node scripts/dev/language-config.mjs sizing --shell', { encoding: 'utf-8' }).trim();
     assert.match(sizingOut, /MEM_MIN_RECOMMENDED=\d+/);
     assert.match(sizingOut, /WARM_RAM_MB=\d+/);
+
+    // Bug regression: sizing warm RAM must be > 0 when database languages are pooled.
+    // Previously getLanguageById(slug) returned null, so warmRamMb was always 0 for DB pools.
+    const sizingRaw = execSync('node scripts/dev/language-config.mjs sizing --json 2>/dev/null', {
+      encoding: 'utf-8',
+      shell: true,
+    });
+    // The JSON output may be preceded by WARN lines; grab the JSON block
+    const jsonStart = sizingRaw.indexOf('{');
+    const sizingObj = JSON.parse(sizingRaw.slice(jsonStart));
+    if (sizingObj.pooledLanguages && sizingObj.pooledLanguages.some(s => ['postgresql', 'mysql', 'mongodb'].includes(s))) {
+      assert.ok(sizingObj.warmRamMb > 0, `warmRamMb must be > 0 when DB languages are pooled, got ${sizingObj.warmRamMb}`);
+    }
   });
 
   it('11. scripts/preflight.sh --sizing-only runs hermetically without Docker', async () => {
@@ -504,6 +518,75 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
     });
     assert.strictEqual(pool.pools[5].targetPoolSize, 7);
 
+    // updateOptions updating shared pool member recalculates group size to Math.max
+    pool.updateOptions({
+      languagePoolSizes: {
+        c: 8,
+      },
+    });
+    assert.strictEqual(pool.pools[1].targetPoolSize, 8);
+    assert.strictEqual(pool.pools[2].targetPoolSize, 8);
+
     await pool.shutdown();
+  });
+
+  it('16. Empty string env vars and options fallback gracefully without throwing', async () => {
+    const mockDocker = createMockDocker();
+    const mockRedis = createMockRedis();
+
+    // Empty string env vars simulated
+    const origPg = process.env.LANGUAGE_POSTGRESQL_POOL_SIZE;
+    const origMy = process.env.LANGUAGE_MYSQL_POOL_SIZE;
+    const origMo = process.env.LANGUAGE_MONGODB_POOL_SIZE;
+
+    try {
+      process.env.LANGUAGE_POSTGRESQL_POOL_SIZE = '';
+      process.env.LANGUAGE_MYSQL_POOL_SIZE = '';
+      process.env.LANGUAGE_MONGODB_POOL_SIZE = '';
+
+      const pool = new WarmContainerPool(mockDocker, {
+        redis: mockRedis,
+        concurrency: 3,
+        languagePoolSizes: {
+          python: '',
+        },
+      });
+
+      assert.strictEqual(pool.postgresPoolSize, 3);
+      assert.strictEqual(pool.mysqlPoolSize, 3);
+      assert.strictEqual(pool.mongodbPoolSize, 3);
+
+      await pool.shutdown();
+    } finally {
+      if (origPg !== undefined) process.env.LANGUAGE_POSTGRESQL_POOL_SIZE = origPg; else delete process.env.LANGUAGE_POSTGRESQL_POOL_SIZE;
+      if (origMy !== undefined) process.env.LANGUAGE_MYSQL_POOL_SIZE = origMy; else delete process.env.LANGUAGE_MYSQL_POOL_SIZE;
+      if (origMo !== undefined) process.env.LANGUAGE_MONGODB_POOL_SIZE = origMo; else delete process.env.LANGUAGE_MONGODB_POOL_SIZE;
+    }
+  });
+
+  it('17. describeLanguagePlan supports options overrides and config.executor is defined', () => {
+    const customPlan = describeLanguagePlan({
+      concurrency: 5,
+      dbConcurrency: 4,
+      languagePoolSizes: {
+        postgresql: 7,
+        python: 3,
+      },
+      languagePoolFlags: {
+        python: true,
+      },
+      isolateAvailable: false,
+    });
+
+    const pg = customPlan.find(p => p.slug === 'postgresql');
+    assert.strictEqual(pg.poolSize, 7);
+
+    const py = customPlan.find(p => p.slug === 'python');
+    assert.strictEqual(py.strategy, 'pooled');
+    assert.strictEqual(py.poolSize, 3);
+
+    // Verify config.executor is defined and safe
+    assert.ok(config.executor);
+    assert.strictEqual(typeof config.executor.type, 'string');
   });
 });

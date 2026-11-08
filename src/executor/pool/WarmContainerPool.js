@@ -16,6 +16,11 @@ import {
 
 export { getPoolConcurrency };
 
+function cleanVal(val) {
+  if (val === undefined || val === null || val === '') return undefined;
+  return val;
+}
+
 export class WarmContainerPool {
   constructor(docker, options = {}) {
     this.options = options;
@@ -33,10 +38,12 @@ export class WarmContainerPool {
     }
 
     // A3: DB pools size = WORKER_CONCURRENCY for each engine, overrides must be integers >= 1
-    const rawPg = options.postgresPoolSize !== undefined
-      ? options.postgresPoolSize
-      : (options.languagePoolSizes?.postgresql ?? options.postgresqlPoolSize ?? process.env.LANGUAGE_POSTGRESQL_POOL_SIZE ?? process.env.POSTGRES_POOL_SIZE);
-    if (rawPg !== undefined && rawPg !== null) {
+    const rawPg = cleanVal(options.postgresPoolSize)
+      ?? cleanVal(options.languagePoolSizes?.postgresql)
+      ?? cleanVal(options.postgresqlPoolSize)
+      ?? cleanVal(process.env.LANGUAGE_POSTGRESQL_POOL_SIZE)
+      ?? cleanVal(process.env.POSTGRES_POOL_SIZE);
+    if (rawPg !== undefined) {
       const parsedPg = Number(rawPg);
       if (!Number.isInteger(parsedPg) || parsedPg < 1) {
         throw new Error(`POSTGRES_POOL_SIZE must be an integer >= 1, got ${rawPg}`);
@@ -46,10 +53,12 @@ export class WarmContainerPool {
       this.postgresPoolSize = baseConcurrency;
     }
 
-    const rawMy = options.mysqlPoolSize !== undefined
-      ? options.mysqlPoolSize
-      : (options.languagePoolSizes?.mysql ?? options.mysqlPoolSize ?? process.env.LANGUAGE_MYSQL_POOL_SIZE ?? process.env.MYSQL_POOL_SIZE);
-    if (rawMy !== undefined && rawMy !== null) {
+    const rawMy = cleanVal(options.mysqlPoolSize)
+      ?? cleanVal(options.languagePoolSizes?.mysql)
+      ?? cleanVal(options.mysqlPoolSize)
+      ?? cleanVal(process.env.LANGUAGE_MYSQL_POOL_SIZE)
+      ?? cleanVal(process.env.MYSQL_POOL_SIZE);
+    if (rawMy !== undefined) {
       const parsedMy = Number(rawMy);
       if (!Number.isInteger(parsedMy) || parsedMy < 1) {
         throw new Error(`MYSQL_POOL_SIZE must be an integer >= 1, got ${rawMy}`);
@@ -59,16 +68,18 @@ export class WarmContainerPool {
       this.mysqlPoolSize = baseConcurrency;
     }
 
-    const rawMongo = options.mongodbPoolSize !== undefined
-      ? options.mongodbPoolSize
-      : (options.languagePoolSizes?.mongodb ?? options.mongodbPoolSize ?? process.env.LANGUAGE_MONGODB_POOL_SIZE ?? process.env.MONGODB_POOL_SIZE);
-    if (rawMongo !== undefined && rawMongo !== null) {
+    const rawMongo = cleanVal(options.mongodbPoolSize)
+      ?? cleanVal(options.languagePoolSizes?.mongodb)
+      ?? cleanVal(options.mongodbPoolSize)
+      ?? cleanVal(process.env.LANGUAGE_MONGODB_POOL_SIZE)
+      ?? cleanVal(process.env.MONGODB_POOL_SIZE);
+    if (rawMongo !== undefined) {
       const parsedMongo = Number(rawMongo);
       if (!Number.isInteger(parsedMongo) || parsedMongo < 1) {
         throw new Error(`MONGODB_POOL_SIZE must be an integer >= 1, got ${rawMongo}`);
       }
       this.mongodbPoolSize = parsedMongo;
-    } else if (options.postgresPoolSize !== undefined && options.mysqlPoolSize !== undefined && options.mongodbPoolSize === undefined && process.env.MONGODB_POOL_SIZE === undefined && process.env.LANGUAGE_MONGODB_POOL_SIZE === undefined) {
+    } else if (cleanVal(options.postgresPoolSize) !== undefined && cleanVal(options.mysqlPoolSize) !== undefined && cleanVal(options.mongodbPoolSize) === undefined && cleanVal(process.env.MONGODB_POOL_SIZE) === undefined && cleanVal(process.env.LANGUAGE_MONGODB_POOL_SIZE) === undefined) {
       this.mongodbPoolSize = Number(options.postgresPoolSize);
     } else {
       this.mongodbPoolSize = baseConcurrency;
@@ -296,7 +307,7 @@ export class WarmContainerPool {
     const slug = lang.slug;
 
     if (this.options?.languagePoolSizes) {
-      const custom = this.options.languagePoolSizes[slug] ?? this.options.languagePoolSizes[lang.id];
+      const custom = cleanVal(this.options.languagePoolSizes[slug] ?? this.options.languagePoolSizes[lang.id]);
       if (custom !== undefined) {
         const parsed = Number(custom);
         if (!Number.isInteger(parsed) || parsed < 1) {
@@ -306,12 +317,14 @@ export class WarmContainerPool {
       }
     }
     if (this.options?.[slug + 'PoolSize'] !== undefined) {
-      const custom = this.options[slug + 'PoolSize'];
-      const parsed = Number(custom);
-      if (!Number.isInteger(parsed) || parsed < 1) {
-        throw new Error(`pool size for ${slug} must be an integer >= 1, got ${custom}`);
+      const custom = cleanVal(this.options[slug + 'PoolSize']);
+      if (custom !== undefined) {
+        const parsed = Number(custom);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          throw new Error(`pool size for ${slug} must be an integer >= 1, got ${custom}`);
+        }
+        return parsed;
       }
-      return parsed;
     }
 
     if (slug === 'postgresql' && this.postgresPoolSize !== undefined) {
@@ -367,12 +380,24 @@ export class WarmContainerPool {
       if (this.pools[10]) this.pools[10].targetPoolSize = this.mongodbPoolSize;
     }
     if (options.languagePoolSizes) {
+      this.options = this.options || {};
+      this.options.languagePoolSizes = {
+        ...(this.options.languagePoolSizes || {}),
+        ...options.languagePoolSizes,
+      };
       for (const [slug, size] of Object.entries(options.languagePoolSizes)) {
         const lang = getLanguageBySlug(slug);
         if (lang) {
           const parsed = Number(size);
           if (!Number.isInteger(parsed) || parsed < 1) {
             throw new Error(`pool size for ${slug} must be an integer >= 1, got ${size}`);
+          }
+          if (slug === 'postgresql' || lang.id === 8) {
+            this.postgresPoolSize = parsed;
+          } else if (slug === 'mysql' || lang.id === 9) {
+            this.mysqlPoolSize = parsed;
+          } else if (slug === 'mongodb' || lang.id === 10) {
+            this.mongodbPoolSize = parsed;
           }
           if (this.pools[lang.id]) {
             this.pools[lang.id].targetPoolSize = parsed;
@@ -401,6 +426,10 @@ export class WarmContainerPool {
       const uniquePools = new Set(Object.values(this.pools));
       for (const pool of uniquePools) {
         if (pool.languages && pool.languages.length > 0) {
+          const configuredSizes = pool.languages.map(id => this.getLanguagePoolSize(getLanguageById(id))).filter(s => s !== undefined);
+          if (configuredSizes.length > 0) {
+            pool.targetPoolSize = Math.max(...configuredSizes);
+          }
           this.checkReplenish(pool.languages[0]);
         } else if (pool.langId) {
           this.checkReplenish(pool.langId);

@@ -247,15 +247,15 @@ export function describeLanguagePlan(options = {}) {
     }
   }
 
-  const rawConcurrency = Number(process.env.WORKER_CONCURRENCY);
+  const rawConcurrency = options.concurrency !== undefined ? Number(options.concurrency) : Number(process.env.WORKER_CONCURRENCY);
   const baseWorkerConcurrency = Number.isInteger(rawConcurrency) && rawConcurrency > 0 ? rawConcurrency : 2;
-  const rawDbConcurrency = Number(process.env.WORKER_DB_CONCURRENCY);
+  const rawDbConcurrency = options.dbConcurrency !== undefined ? Number(options.dbConcurrency) : Number(process.env.WORKER_DB_CONCURRENCY);
   const dbConcurrency = Number.isInteger(rawDbConcurrency) && rawDbConcurrency > 0 ? rawDbConcurrency : baseWorkerConcurrency;
 
   return enabled.map(lang => {
     const isDb = isDatabaseLanguage(lang);
-    const poolFlag = getLanguagePoolFlag(lang);
-    const customSize = getLanguagePoolSize(lang);
+    const poolFlag = options.languagePoolFlags?.[lang.slug] ?? options.languagePoolFlags?.[lang.id] ?? getLanguagePoolFlag(lang);
+    const customSize = options.languagePoolSizes?.[lang.slug] ?? options.languagePoolSizes?.[lang.id] ?? getLanguagePoolSize(lang);
 
     let executor;
     let strategy;
@@ -361,7 +361,7 @@ export function isDatabaseLanguage(languageOrId) {
     ? languageOrId
     : (languagesById.get(typeof languageOrId === 'string' ? parseInt(languageOrId, 10) : languageOrId)
       || languagesBySlug.get(String(languageOrId).toLowerCase()));
-  return Boolean(lang && (lang.is_daemon || (lang.category === 'database' && lang.is_daemon)));
+  return Boolean(lang && lang.is_daemon);
 }
 
 // Status codes (Judge0 compatible)

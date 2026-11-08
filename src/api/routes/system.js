@@ -145,7 +145,7 @@ router.get('/executor', (req, res) => {
     res.json({
       current_executor: capabilities.current,
       recommended: capabilities.recommended,
-      configured: config.executor.type,
+      configured: config.executor?.type || process.env.EXECUTOR_TYPE || 'auto',
       capabilities: {
         docker: capabilities.docker,
         isolate: capabilities.isolate,

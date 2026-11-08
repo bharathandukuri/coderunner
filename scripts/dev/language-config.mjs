@@ -14,7 +14,7 @@ import {
   getLanguagePoolFlag,
   describeLanguagePlan,
   isDatabaseLanguage,
-  getLanguageById,
+  getLanguageBySlug,
 } from '../../src/languages/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -86,9 +86,6 @@ switch (command) {
 
     const wConcurrency = parseInt(process.env.WORKER_CONCURRENCY || '2', 10);
     const wDbConcurrency = parseInt(process.env.WORKER_DB_CONCURRENCY || '2', 10);
-    const pgPoolSize = parseInt(process.env.POSTGRES_POOL_SIZE || String(wDbConcurrency), 10);
-    const myPoolSize = parseInt(process.env.MYSQL_POOL_SIZE || String(wDbConcurrency), 10);
-    const mongoPoolSize = parseInt(process.env.MONGODB_POOL_SIZE || String(wDbConcurrency), 10);
 
     const baseMem = process.env.ENABLE_MONITORING === 'false' ? 150 : 360;
     const osReserve = 350;
@@ -96,10 +93,10 @@ switch (command) {
     // Warm RAM: only for pools that will exist
     let warmRamMb = 0;
     const pooledLanguages = plan.filter(p => p.strategy === 'pooled');
-    const pooledImages = new Set();
+    const pooledImageSizes = new Map();
 
     for (const p of pooledLanguages) {
-      const lang = getLanguageById(p.slug);
+      const lang = getLanguageBySlug(p.slug);
       if (lang && isDatabaseLanguage(lang)) {
         if (p.slug === 'postgresql') {
           warmRamMb += p.poolSize * 75;
@@ -115,11 +112,13 @@ switch (command) {
           warmRamMb += p.poolSize * mongoIdleMb;
         }
       } else if (lang && lang.image) {
-        if (!pooledImages.has(lang.image)) {
-          pooledImages.add(lang.image);
-          warmRamMb += p.poolSize * 35; // ~35MB per non-db warm container
-        }
+        const cur = pooledImageSizes.get(lang.image) || 0;
+        pooledImageSizes.set(lang.image, Math.max(cur, p.poolSize));
       }
+    }
+
+    for (const [, size] of pooledImageSizes) {
+      warmRamMb += size * 35; // ~35MB per non-db warm container (shared image pool)
     }
 
     // Per-job memory: for enabled languages

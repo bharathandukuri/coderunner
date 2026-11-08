@@ -188,6 +188,7 @@ The table below catalogs every environment variable controlling capacity, concur
 | `DOCKER_SOCKET`                    | `/var/run/docker.sock`               | Worker     | Path to Docker UNIX domain socket                                               |
 | `DOMAIN`                           | `localhost`                          | Compose    | Public domain name configured in Caddy for automatic TLS                        |
 | `ENABLE_MONGODB`                   | `false`                              | Worker | Opt-in flag to enable MongoDB 8.0 support and container pool                    |
+| `EXECUTOR_TYPE`                    | `auto`                               | Worker     | Execution backend: `auto` (detects Isolate > Docker), `isolate`, or `docker`   |
 | `GF_SERVER_ROOT_URL`               | `%(protocol)s://%(domain)s/grafana/` | Compose    | Grafana subpath routing configuration                                           |
 | `GRAFANA_CPUS`                     | `0.5`                                | Compose    | CPU ceiling for Grafana container                                               |
 | `GRAFANA_MEMORY`                   | `512M`                               | Compose    | Memory ceiling for Grafana container                                            |

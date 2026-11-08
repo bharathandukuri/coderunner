@@ -97,6 +97,10 @@ const config = {
   mongodb: {
     enabled: isLanguageEnabled('mongodb'),
   },
+
+  executor: {
+    type: process.env.EXECUTOR_TYPE || 'auto',
+  },
 };
 
 export {

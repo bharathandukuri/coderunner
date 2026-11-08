@@ -61,6 +61,15 @@ export function getExecutor(languageId) {
     return executorInstance;
   }
 
+  // Check explicit EXECUTOR_TYPE override
+  const explicitType = process.env.EXECUTOR_TYPE || config.executor?.type;
+  if (explicitType === 'docker') {
+    executorType = 'docker';
+    executorInstance = getDockerExecutor();
+    logger.info('Selected Docker executor (explicitly configured via EXECUTOR_TYPE=docker)');
+    return executorInstance;
+  }
+
   // Auto-detect: isolate > docker
   const iso = isIsolateAvailable();
   if (iso.available) {

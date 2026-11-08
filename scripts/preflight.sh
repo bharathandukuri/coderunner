@@ -110,22 +110,32 @@ MONITORING_ACTIVE=true
 ENABLE_MONGO=false
 
 if [ -f "$PROJECT_DIR/.env" ]; then
-  W_CONCURRENCY=$(grep '^WORKER_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  W_DB_CONCURRENCY=$(grep '^WORKER_DB_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  PG_POOL=$(grep '^POSTGRES_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  MY_POOL=$(grep '^MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 2)
-  MONGO_POOL=$(grep '^MONGODB_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d '"' | tr -d "'" || echo 0)
+  W_CONCURRENCY=$(grep '^WORKER_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  W_DB_CONCURRENCY=$(grep '^WORKER_DB_CONCURRENCY=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  # Support both legacy POSTGRES_POOL_SIZE and new LANGUAGE_POSTGRESQL_POOL_SIZE (new takes precedence)
+  PG_POOL=$(grep '^LANGUAGE_POSTGRESQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  if [ -z "$PG_POOL" ]; then
+    PG_POOL=$(grep '^POSTGRES_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  fi
+  MY_POOL=$(grep '^LANGUAGE_MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  if [ -z "$MY_POOL" ]; then
+    MY_POOL=$(grep '^MYSQL_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  fi
+  MONGO_POOL=$(grep '^LANGUAGE_MONGODB_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  if [ -z "$MONGO_POOL" ]; then
+    MONGO_POOL=$(grep '^MONGODB_POOL_SIZE=' "$PROJECT_DIR/.env" | cut -d '=' -f 2- | tr -d "\"'" || true)
+  fi
   if grep -q '^ENABLE_MONITORING=false' "$PROJECT_DIR/.env" 2>/dev/null; then
     MONITORING_ACTIVE=false
   fi
-  if grep -q '^ENABLE_MONGODB=true' "$PROJECT_DIR/.env" 2>/dev/null; then
+  if grep -q '^ENABLE_MONGODB=true' "$PROJECT_DIR/.env" 2>/dev/null || grep -q '^LANGUAGE_MONGODB_ENABLED=true' "$PROJECT_DIR/.env" 2>/dev/null; then
     ENABLE_MONGO=true
   fi
 fi
 
-if [ "${ENABLE_MONGODB:-}" = "true" ]; then
+if [ "${ENABLE_MONGODB:-}" = "true" ] || [ "${LANGUAGE_MONGODB_ENABLED:-}" = "true" ]; then
   ENABLE_MONGO=true
-elif [ "${ENABLE_MONGODB:-}" = "false" ]; then
+elif [ "${ENABLE_MONGODB:-}" = "false" ] && [ "${LANGUAGE_MONGODB_ENABLED:-}" != "true" ]; then
   ENABLE_MONGO=false
 fi
 
