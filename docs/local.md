@@ -156,13 +156,14 @@ Docker isolates code execution inside short-lived or pooled containers using con
 
 ## Warm Container Pools for Languages
 
-By default, database engines (PostgreSQL and MySQL) always use warm pools, while standard languages (Python, Java, C++) execute cold or via Isolate.
+By default, database engines (PostgreSQL, MySQL, MongoDB) maintain warm pools, while standard languages (Python, Java, C++, etc.) execute on-demand via Isolate or Docker.
 
-To enable warm container pooling for standard languages:
+To enable warm container pooling for standard languages individually:
 
-1. In `.env`, set:
+1. In `.env`, set the desired language pool flag and optional pool size:
    ```bash
-   ENABLE_LANGUAGE_POOL=true
+   LANGUAGE_PYTHON_POOL=true
+   LANGUAGE_PYTHON_POOL_SIZE=2
    ```
 2. Build the database and language runner images:
    ```bash

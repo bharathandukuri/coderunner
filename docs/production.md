@@ -341,12 +341,13 @@ If a deployment fails:
 
 ## Language Enablement & Pooling Configuration
 
-Every supported language has an explicit enablement flag and pooling setting:
+Every supported language has explicit enablement, pooling, and pool size settings:
 - `LANGUAGE_<SLUG>_ENABLED`: Defaults to `true` for all languages except `mongodb` (`false`). Set to `false` to completely disable a language, hiding it from `GET /languages` and rejecting submissions with HTTP 422.
 - `LANGUAGE_<SLUG>_POOL`: Defaults to `true` for database engines (`postgresql`, `mysql`, `mongodb`) and `false` for compiled/scripted languages.
-  - **Database languages with POOL=true**: Maintain a warm pool of size `WORKER_CONCURRENCY` (or `*_POOL_SIZE` override) for instant ~5 ms acquire.
+  - **Database languages with POOL=true**: Maintain a warm pool of size `WORKER_CONCURRENCY` (or `LANGUAGE_<SLUG>_POOL_SIZE` override) for instant ~5 ms acquire.
   - **Database languages with POOL=false**: Boot single-use on-demand containers under the global boot cap (`WARM_POOL_MAX_CONCURRENT_BOOTS`), saving idle RAM (~75 MB for Postgres, ~280 MB for MySQL, ~90 MB for Mongo per container) at the cost of ~1.1s - 1.6s container boot latency per request.
   - **Non-database languages**: When Linux Isolate is active, pool flags are ignored with zero Docker overhead. When running under Docker, `POOL=true` maintains warm standby containers with on-demand fallback.
+- `LANGUAGE_<SLUG>_POOL_SIZE`: Configures the target warm pool size individually for each language when `LANGUAGE_<SLUG>_POOL=true`. Defaults to `WORKER_CONCURRENCY` (or `WORKER_DB_CONCURRENCY` for database workers). Must be an integer $\ge 1$. Database aliases `POSTGRES_POOL_SIZE`, `MYSQL_POOL_SIZE`, and `MONGODB_POOL_SIZE` are supported as fallbacks.
 
 ---
 

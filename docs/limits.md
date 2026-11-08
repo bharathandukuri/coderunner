@@ -187,7 +187,6 @@ The table below catalogs every environment variable controlling capacity, concur
 | `DOCKER_RUNTIME`                   | _(empty / runc)_                     | Worker     | Alternative Docker runtime engine (e.g. `runsc` for gVisor sandboxing)          |
 | `DOCKER_SOCKET`                    | `/var/run/docker.sock`               | Worker     | Path to Docker UNIX domain socket                                               |
 | `DOMAIN`                           | `localhost`                          | Compose    | Public domain name configured in Caddy for automatic TLS                        |
-| `ENABLE_LANGUAGE_POOL`             | `false`                              | Worker     | Enables warm container pooling for standard programming languages               |
 | `ENABLE_MONGODB`                   | `false`                              | Worker | Opt-in flag to enable MongoDB 8.0 support and container pool                    |
 | `GF_SERVER_ROOT_URL`               | `%(protocol)s://%(domain)s/grafana/` | Compose    | Grafana subpath routing configuration                                           |
 | `GRAFANA_CPUS`                     | `0.5`                                | Compose    | CPU ceiling for Grafana container                                               |
@@ -198,24 +197,34 @@ The table below catalogs every environment variable controlling capacity, concur
 | `INSTANCE_ID`                      | `worker-<uuid>`                      | Worker     | Unique worker identifier used for container tagging and orphan cleanup          |
 | `LANGUAGE_C_ENABLED`               | `true`                               | Worker/API | Enable execution for C (`gcc:9`)                                                |
 | `LANGUAGE_C_POOL`                  | `false`                              | Worker     | Maintain warm container pool for C when running in Docker                       |
+| `LANGUAGE_C_POOL_SIZE`             | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for C (when pool enabled)                      |
 | `LANGUAGE_CPP_ENABLED`             | `true`                               | Worker/API | Enable execution for C++ (`gcc:9`)                                              |
 | `LANGUAGE_CPP_POOL`                | `false`                              | Worker     | Maintain warm container pool for C++ when running in Docker                     |
+| `LANGUAGE_CPP_POOL_SIZE`           | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for C++ (when pool enabled)                    |
 | `LANGUAGE_JAVA_ENABLED`            | `true`                               | Worker/API | Enable execution for Java (`java:17`)                                           |
 | `LANGUAGE_JAVA_POOL`               | `false`                              | Worker     | Maintain warm container pool for Java when running in Docker                    |
+| `LANGUAGE_JAVA_POOL_SIZE`          | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for Java (when pool enabled)                   |
 | `LANGUAGE_JAVASCRIPT_ENABLED`      | `true`                               | Worker/API | Enable execution for JavaScript (`node:18`)                                     |
 | `LANGUAGE_JAVASCRIPT_POOL`         | `false`                              | Worker     | Maintain warm container pool for JavaScript when running in Docker              |
+| `LANGUAGE_JAVASCRIPT_POOL_SIZE`    | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for JavaScript (when pool enabled)             |
 | `LANGUAGE_MONGODB_ENABLED`         | `false`                              | Worker/API | Enable execution for MongoDB (`mongodb:8.0`)                                    |
 | `LANGUAGE_MONGODB_POOL`            | `true`                               | Worker     | Maintain warm container pool for MongoDB (when enabled)                         |
+| `LANGUAGE_MONGODB_POOL_SIZE`       | `WORKER_DB_CONCURRENCY`              | Worker     | Target idle warm container depth for MongoDB (when pool enabled)                |
 | `LANGUAGE_MYSQL_ENABLED`           | `true`                               | Worker/API | Enable execution for MySQL (`mysql:8.4`)                                        |
 | `LANGUAGE_MYSQL_POOL`              | `true`                               | Worker     | Maintain warm container pool for MySQL                                          |
+| `LANGUAGE_MYSQL_POOL_SIZE`         | `2`                                  | Worker     | Target idle warm container depth for MySQL (when pool enabled)                  |
 | `LANGUAGE_POSTGRESQL_ENABLED`      | `true`                               | Worker/API | Enable execution for PostgreSQL (`postgres:16`)                                 |
 | `LANGUAGE_POSTGRESQL_POOL`         | `true`                               | Worker     | Maintain warm container pool for PostgreSQL                                     |
+| `LANGUAGE_POSTGRESQL_POOL_SIZE`    | `2`                                  | Worker     | Target idle warm container depth for PostgreSQL (when pool enabled)             |
 | `LANGUAGE_PYTHON_ENABLED`          | `true`                               | Worker/API | Enable execution for Python (`python:3.8`)                                      |
 | `LANGUAGE_PYTHON_POOL`             | `false`                              | Worker     | Maintain warm container pool for Python when running in Docker                  |
+| `LANGUAGE_PYTHON_POOL_SIZE`        | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for Python (when pool enabled)                 |
 | `LANGUAGE_SQLITE_ENABLED`          | `true`                               | Worker/API | Enable execution for SQLite (`sqlite:3`)                                        |
 | `LANGUAGE_SQLITE_POOL`             | `false`                              | Worker     | Maintain warm container pool for SQLite                                         |
+| `LANGUAGE_SQLITE_POOL_SIZE`        | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for SQLite (when pool enabled)                 |
 | `LANGUAGE_TYPESCRIPT_ENABLED`      | `true`                               | Worker/API | Enable execution for TypeScript (`typescript:5`)                                |
 | `LANGUAGE_TYPESCRIPT_POOL`         | `false`                              | Worker     | Maintain warm container pool for TypeScript when running in Docker              |
+| `LANGUAGE_TYPESCRIPT_POOL_SIZE`    | `WORKER_CONCURRENCY`                 | Worker     | Target idle warm container depth for TypeScript (when pool enabled)             |
 | `MAX_ADDITIONAL_FILES_SIZE`        | `2097152`                            | Sandbox    | Maximum size (bytes) of auxiliary files submitted with code (2 MB)              |
 | `MAX_BATCH_SIZE`                   | `20`                                 | API        | Maximum number of submissions allowed in a single batch request                 |
 | `MAX_CONCURRENT_WAIT_REQUESTS`     | `concurrency * 25`                   | API        | Maximum simultaneous HTTP requests holding long-poll connections (`?wait=true`) |

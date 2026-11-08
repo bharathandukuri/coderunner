@@ -44,16 +44,14 @@ export function initLanguageConfig(env = process.env, force = false) {
     throw new Error('ENABLED_LANGUAGES is not supported. Use per-language variables like LANGUAGE_<SLUG>_ENABLED instead.');
   }
 
+  if (env.ENABLE_LANGUAGE_POOL !== undefined) {
+    throw new Error('ENABLE_LANGUAGE_POOL is not supported. Use per-language variables like LANGUAGE_<SLUG>_POOL and LANGUAGE_<SLUG>_POOL_SIZE instead.');
+  }
+
   const enabledMap = new Map();
   const poolMap = new Map();
+  const poolSizeMap = new Map();
   const warnings = [];
-
-  // Check deprecated aliases
-  let deprecatedPoolAlias = undefined;
-  if (env.ENABLE_LANGUAGE_POOL !== undefined && env.ENABLE_LANGUAGE_POOL !== '') {
-    deprecatedPoolAlias = parseBooleanStrict(env.ENABLE_LANGUAGE_POOL, 'ENABLE_LANGUAGE_POOL');
-    warnings.push('ENABLE_LANGUAGE_POOL is deprecated; use LANGUAGE_<SLUG>_POOL');
-  }
 
   let deprecatedMongoAlias = undefined;
   if (env.ENABLE_MONGODB !== undefined && env.ENABLE_MONGODB !== '') {
@@ -65,6 +63,7 @@ export function initLanguageConfig(env = process.env, force = false) {
     const slugUpper = lang.slug.toUpperCase();
     const enabledVar = `LANGUAGE_${slugUpper}_ENABLED`;
     const poolVar = `LANGUAGE_${slugUpper}_POOL`;
+    const poolSizeVar = `LANGUAGE_${slugUpper}_POOL_SIZE`;
 
     // 1. Resolve Enabled flag
     let enabled;
@@ -85,8 +84,6 @@ export function initLanguageConfig(env = process.env, force = false) {
 
     if (explicitPoolSet) {
       pool = parseBooleanStrict(rawPool, poolVar);
-    } else if (!isDb && deprecatedPoolAlias !== undefined) {
-      pool = deprecatedPoolAlias;
     } else {
       pool = isDb; // default true for database languages, false for all others
     }
@@ -99,10 +96,42 @@ export function initLanguageConfig(env = process.env, force = false) {
       pool = false;
     }
 
+    // 3. Resolve Pool Size
+    let poolSize = undefined;
+    let rawPoolSize = env[poolSizeVar];
+    let usedPoolSizeVar = poolSizeVar;
+
+    if ((rawPoolSize === undefined || rawPoolSize === '') && isDb) {
+      if (lang.slug === 'postgresql' && env.POSTGRES_POOL_SIZE !== undefined && env.POSTGRES_POOL_SIZE !== '') {
+        rawPoolSize = env.POSTGRES_POOL_SIZE;
+        usedPoolSizeVar = 'POSTGRES_POOL_SIZE';
+      } else if (lang.slug === 'mysql' && env.MYSQL_POOL_SIZE !== undefined && env.MYSQL_POOL_SIZE !== '') {
+        rawPoolSize = env.MYSQL_POOL_SIZE;
+        usedPoolSizeVar = 'MYSQL_POOL_SIZE';
+      } else if (lang.slug === 'mongodb' && env.MONGODB_POOL_SIZE !== undefined && env.MONGODB_POOL_SIZE !== '') {
+        rawPoolSize = env.MONGODB_POOL_SIZE;
+        usedPoolSizeVar = 'MONGODB_POOL_SIZE';
+      }
+    }
+
+    if (rawPoolSize !== undefined && rawPoolSize !== '') {
+      const parsedSize = Number(rawPoolSize);
+      if (!Number.isInteger(parsedSize) || parsedSize < 1) {
+        throw new Error(`${usedPoolSizeVar} must be an integer >= 1, got ${rawPoolSize}`);
+      }
+      poolSize = parsedSize;
+    }
+
+    if (poolSize !== undefined && (!enabled || !pool)) {
+      warnings.push(`POOL_SIZE set for ${lang.slug} (${usedPoolSizeVar}) where pool is not enabled`);
+    }
+
     enabledMap.set(lang.id, enabled);
     enabledMap.set(lang.slug, enabled);
     poolMap.set(lang.id, pool);
     poolMap.set(lang.slug, pool);
+    poolSizeMap.set(lang.id, poolSize);
+    poolSizeMap.set(lang.slug, poolSize);
   }
 
   // Log warnings
@@ -116,7 +145,7 @@ export function initLanguageConfig(env = process.env, force = false) {
     throw new Error('At least one language must be enabled. No languages are currently enabled.');
   }
 
-  parsedConfig = { enabledMap, poolMap, warnings };
+  parsedConfig = { enabledMap, poolMap, poolSizeMap, warnings };
   return parsedConfig;
 }
 
@@ -168,6 +197,23 @@ export function getLanguagePoolFlag(languageOrId) {
 }
 
 /**
+ * Get configured language pool size override
+ * @param {object|number|string} languageOrId - Language object, ID, or slug
+ * @returns {number|undefined} Configured pool size or undefined if not set
+ */
+export function getLanguagePoolSize(languageOrId) {
+  ensureConfig();
+  if (!languageOrId) return undefined;
+  if (typeof languageOrId === 'object') {
+    return parsedConfig.poolSizeMap.get(languageOrId.id);
+  }
+  if (typeof languageOrId === 'number' || /^\d+$/.test(languageOrId)) {
+    return parsedConfig.poolSizeMap.get(Number(languageOrId));
+  }
+  return parsedConfig.poolSizeMap.get(String(languageOrId).toLowerCase());
+}
+
+/**
  * Get list of all enabled languages
  * @returns {object[]} List of enabled language configurations
  */
@@ -209,6 +255,7 @@ export function describeLanguagePlan(options = {}) {
   return enabled.map(lang => {
     const isDb = isDatabaseLanguage(lang);
     const poolFlag = getLanguagePoolFlag(lang);
+    const customSize = getLanguagePoolSize(lang);
 
     let executor;
     let strategy;
@@ -218,18 +265,7 @@ export function describeLanguagePlan(options = {}) {
       executor = 'docker';
       if (poolFlag) {
         strategy = 'pooled';
-        if (lang.slug === 'postgresql') {
-          const pg = Number(process.env.POSTGRES_POOL_SIZE);
-          poolSize = Number.isInteger(pg) && pg > 0 ? pg : dbConcurrency;
-        } else if (lang.slug === 'mysql') {
-          const my = Number(process.env.MYSQL_POOL_SIZE);
-          poolSize = Number.isInteger(my) && my > 0 ? my : dbConcurrency;
-        } else if (lang.slug === 'mongodb') {
-          const mg = Number(process.env.MONGODB_POOL_SIZE);
-          poolSize = Number.isInteger(mg) && mg > 0 ? mg : dbConcurrency;
-        } else {
-          poolSize = dbConcurrency;
-        }
+        poolSize = customSize !== undefined ? customSize : dbConcurrency;
       } else {
         strategy = 'on-demand-boot';
         poolSize = 0;
@@ -243,7 +279,7 @@ export function describeLanguagePlan(options = {}) {
         executor = 'docker';
         if (poolFlag) {
           strategy = 'pooled';
-          poolSize = baseWorkerConcurrency;
+          poolSize = customSize !== undefined ? customSize : baseWorkerConcurrency;
         } else {
           strategy = 'on-demand';
           poolSize = 0;
@@ -368,6 +404,7 @@ export default {
   _resetLanguageConfig,
   isLanguageEnabled,
   getLanguagePoolFlag,
+  getLanguagePoolSize,
   getEnabledLanguages,
   describeLanguagePlan,
   getLanguageById,

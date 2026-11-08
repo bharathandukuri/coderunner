@@ -396,12 +396,11 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     }, /MYSQL_POOL_SIZE must be an integer >= 1/);
   });
 
-  it('13. ENABLE_LANGUAGE_POOL=false creates no language pools', async () => {
+  it('13. Non-database languages default to POOL=false and create no language pools', async () => {
     const mockDocker = createMockDocker();
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
       concurrency: 2,
-      enableLanguagePool: false,
     });
 
     assert.strictEqual(pool.pools[5], undefined, 'Language 5 pool must not exist');
@@ -417,7 +416,7 @@ describe('WarmContainerPool Unit Tests (Mocked Docker)', () => {
     const pool = new WarmContainerPool(mockDocker, {
       redis: createMockRedis(),
       concurrency: 2,
-      enableLanguagePool: true,
+      languagePoolFlags: { python: true },
     });
 
     // Language 5 pool starts empty -> acquire falls back to on-demand

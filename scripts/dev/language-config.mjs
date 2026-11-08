@@ -102,9 +102,9 @@ switch (command) {
       const lang = getLanguageById(p.slug);
       if (lang && isDatabaseLanguage(lang)) {
         if (p.slug === 'postgresql') {
-          warmRamMb += pgPoolSize * 75;
+          warmRamMb += p.poolSize * 75;
         } else if (p.slug === 'mysql') {
-          warmRamMb += myPoolSize * 280;
+          warmRamMb += p.poolSize * 280;
         } else if (p.slug === 'mongodb') {
           const mongoMeasuredFile = path.join(projectRoot, 'docs/benchmarks/mongodb-footprint/measured_idle_mb.txt');
           let mongoIdleMb = 90;
@@ -112,12 +112,12 @@ switch (command) {
             const measured = parseInt(fs.readFileSync(mongoMeasuredFile, 'utf-8').trim(), 10);
             if (!isNaN(measured)) mongoIdleMb = measured;
           }
-          warmRamMb += mongoPoolSize * mongoIdleMb;
+          warmRamMb += p.poolSize * mongoIdleMb;
         }
       } else if (lang && lang.image) {
         if (!pooledImages.has(lang.image)) {
           pooledImages.add(lang.image);
-          warmRamMb += wConcurrency * 35; // ~35MB per non-db warm container
+          warmRamMb += p.poolSize * 35; // ~35MB per non-db warm container
         }
       }
     }

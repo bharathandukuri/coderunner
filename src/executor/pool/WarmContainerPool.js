@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import config, { getPoolConcurrency } from '../../utils/config.js';
 import logger from '../../utils/logger.js';
 import { createDockerClient } from '../../utils/dockerClient.js';
-import { getLanguageById, getAllLanguages, isLanguageEnabled, getLanguagePoolFlag, isDatabaseLanguage } from '../../languages/index.js';
+import { getLanguageById, getLanguageBySlug, getAllLanguages, isLanguageEnabled, getLanguagePoolFlag, getLanguagePoolSize, isDatabaseLanguage } from '../../languages/index.js';
 import { buildContainerConfig } from '../containerConfig.js';
 import {
   recordPoolDepth,
@@ -33,7 +33,9 @@ export class WarmContainerPool {
     }
 
     // A3: DB pools size = WORKER_CONCURRENCY for each engine, overrides must be integers >= 1
-    const rawPg = options.postgresPoolSize !== undefined ? options.postgresPoolSize : process.env.POSTGRES_POOL_SIZE;
+    const rawPg = options.postgresPoolSize !== undefined
+      ? options.postgresPoolSize
+      : (options.languagePoolSizes?.postgresql ?? options.postgresqlPoolSize ?? process.env.LANGUAGE_POSTGRESQL_POOL_SIZE ?? process.env.POSTGRES_POOL_SIZE);
     if (rawPg !== undefined && rawPg !== null) {
       const parsedPg = Number(rawPg);
       if (!Number.isInteger(parsedPg) || parsedPg < 1) {
@@ -44,7 +46,9 @@ export class WarmContainerPool {
       this.postgresPoolSize = baseConcurrency;
     }
 
-    const rawMy = options.mysqlPoolSize !== undefined ? options.mysqlPoolSize : process.env.MYSQL_POOL_SIZE;
+    const rawMy = options.mysqlPoolSize !== undefined
+      ? options.mysqlPoolSize
+      : (options.languagePoolSizes?.mysql ?? options.mysqlPoolSize ?? process.env.LANGUAGE_MYSQL_POOL_SIZE ?? process.env.MYSQL_POOL_SIZE);
     if (rawMy !== undefined && rawMy !== null) {
       const parsedMy = Number(rawMy);
       if (!Number.isInteger(parsedMy) || parsedMy < 1) {
@@ -55,14 +59,16 @@ export class WarmContainerPool {
       this.mysqlPoolSize = baseConcurrency;
     }
 
-    const rawMongo = options.mongodbPoolSize !== undefined ? options.mongodbPoolSize : process.env.MONGODB_POOL_SIZE;
+    const rawMongo = options.mongodbPoolSize !== undefined
+      ? options.mongodbPoolSize
+      : (options.languagePoolSizes?.mongodb ?? options.mongodbPoolSize ?? process.env.LANGUAGE_MONGODB_POOL_SIZE ?? process.env.MONGODB_POOL_SIZE);
     if (rawMongo !== undefined && rawMongo !== null) {
       const parsedMongo = Number(rawMongo);
       if (!Number.isInteger(parsedMongo) || parsedMongo < 1) {
         throw new Error(`MONGODB_POOL_SIZE must be an integer >= 1, got ${rawMongo}`);
       }
       this.mongodbPoolSize = parsedMongo;
-    } else if (options.postgresPoolSize !== undefined && options.mysqlPoolSize !== undefined && options.mongodbPoolSize === undefined && process.env.MONGODB_POOL_SIZE === undefined) {
+    } else if (options.postgresPoolSize !== undefined && options.mysqlPoolSize !== undefined && options.mongodbPoolSize === undefined && process.env.MONGODB_POOL_SIZE === undefined && process.env.LANGUAGE_MONGODB_POOL_SIZE === undefined) {
       this.mongodbPoolSize = Number(options.postgresPoolSize);
     } else {
       this.mongodbPoolSize = baseConcurrency;
@@ -102,12 +108,6 @@ export class WarmContainerPool {
       : process.env.ENABLE_MONGODB === 'true';
     this.enableMongodb = enableMongo;
 
-    // A4: Language pools opt-in via ENABLE_LANGUAGE_POOL (default false)
-    const enableLanguagePool = options.enableLanguagePool !== undefined
-      ? Boolean(options.enableLanguagePool)
-      : (process.env.ENABLE_LANGUAGE_POOL === 'true');
-    this.enableLanguagePool = enableLanguagePool;
-
     this.pools = {};
     const allLangs = getAllLanguages();
 
@@ -117,7 +117,7 @@ export class WarmContainerPool {
       if (!this.isLanguageEnabled(lang)) continue;
       if (!this.getLanguagePoolFlag(lang)) continue;
 
-      let targetPoolSize = baseConcurrency;
+      let targetPoolSize = this.getLanguagePoolSize(lang) || baseConcurrency;
       if (lang.slug === 'postgresql' || lang.id === 8) {
         targetPoolSize = this.postgresPoolSize;
       } else if (lang.slug === 'mysql' || lang.id === 9) {
@@ -169,6 +169,11 @@ export class WarmContainerPool {
       const boxSize = Math.max(Math.ceil(effectiveMemory / 1024), 128);
       const name = langs.map(l => (l.name || '').split(/[\s(]/)[0].toLowerCase()).join('_');
 
+      const configuredSizes = langs.map(l => this.getLanguagePoolSize(l)).filter(s => s !== undefined);
+      const groupTargetPoolSize = configuredSizes.length > 0
+        ? Math.max(...configuredSizes)
+        : (this.targetPoolSize || baseConcurrency);
+
       const sharedPool = {
         available: [],
         waiters: [],
@@ -176,7 +181,7 @@ export class WarmContainerPool {
         consecutiveFailures: 0,
         circuitState: 'closed',
         circuitOpenUntil: 0,
-        targetPoolSize: this.targetPoolSize || baseConcurrency,
+        targetPoolSize: groupTargetPoolSize,
         image,
         name,
         isDaemon: false,
@@ -286,6 +291,47 @@ export class WarmContainerPool {
     return getLanguagePoolFlag(lang);
   }
 
+  getLanguagePoolSize(lang) {
+    if (!lang) return undefined;
+    const slug = lang.slug;
+
+    if (this.options?.languagePoolSizes) {
+      const custom = this.options.languagePoolSizes[slug] ?? this.options.languagePoolSizes[lang.id];
+      if (custom !== undefined) {
+        const parsed = Number(custom);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          throw new Error(`pool size for ${slug} must be an integer >= 1, got ${custom}`);
+        }
+        return parsed;
+      }
+    }
+    if (this.options?.[slug + 'PoolSize'] !== undefined) {
+      const custom = this.options[slug + 'PoolSize'];
+      const parsed = Number(custom);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        throw new Error(`pool size for ${slug} must be an integer >= 1, got ${custom}`);
+      }
+      return parsed;
+    }
+
+    if (slug === 'postgresql' && this.postgresPoolSize !== undefined) {
+      return this.postgresPoolSize;
+    }
+    if (slug === 'mysql' && this.mysqlPoolSize !== undefined) {
+      return this.mysqlPoolSize;
+    }
+    if (slug === 'mongodb' && this.mongodbPoolSize !== undefined) {
+      return this.mongodbPoolSize;
+    }
+
+    const configured = getLanguagePoolSize(lang);
+    if (configured !== undefined) {
+      return configured;
+    }
+
+    return undefined;
+  }
+
   /**
    * Update pool configuration dynamically
    */
@@ -319,6 +365,20 @@ export class WarmContainerPool {
       }
       this.mongodbPoolSize = parsed;
       if (this.pools[10]) this.pools[10].targetPoolSize = this.mongodbPoolSize;
+    }
+    if (options.languagePoolSizes) {
+      for (const [slug, size] of Object.entries(options.languagePoolSizes)) {
+        const lang = getLanguageBySlug(slug);
+        if (lang) {
+          const parsed = Number(size);
+          if (!Number.isInteger(parsed) || parsed < 1) {
+            throw new Error(`pool size for ${slug} must be an integer >= 1, got ${size}`);
+          }
+          if (this.pools[lang.id]) {
+            this.pools[lang.id].targetPoolSize = parsed;
+          }
+        }
+      }
     }
     if (options.poolSize !== undefined) {
       const ps = Number(options.poolSize);

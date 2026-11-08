@@ -8,6 +8,7 @@ import {
   _resetLanguageConfig,
   isLanguageEnabled,
   getLanguagePoolFlag,
+  getLanguagePoolSize,
   describeLanguagePlan,
 } from '../src/languages/index.js';
 import { validateRun, validateBatchRun } from '../src/api/middleware/validation.js';
@@ -113,6 +114,13 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
         ENABLED_LANGUAGES: 'python,c',
       }, true);
     }, /ENABLED_LANGUAGES is not supported/);
+
+    // ENABLE_LANGUAGE_POOL is rejected with helpful message
+    assert.throws(() => {
+      initLanguageConfig({
+        ENABLE_LANGUAGE_POOL: 'false',
+      }, true);
+    }, /ENABLE_LANGUAGE_POOL is not supported/);
 
     // Reset to defaults
     _resetLanguageConfig();
@@ -409,5 +417,93 @@ describe('Language Enable & Pool Settings (Section 1 & 2)', () => {
 
     assert.doesNotMatch(buildImagesSrc, /coderunner\/multi/);
     assert.doesNotMatch(deploySrc, /coderunner\/multi/);
+  });
+
+  it('14. Per-language pool size configuration (LANGUAGE_<SLUG>_POOL_SIZE)', () => {
+    initLanguageConfig({
+      LANGUAGE_PYTHON_ENABLED: 'true',
+      LANGUAGE_PYTHON_POOL: 'true',
+      LANGUAGE_PYTHON_POOL_SIZE: '4',
+      LANGUAGE_JAVASCRIPT_POOL_SIZE: '2',
+      LANGUAGE_POSTGRESQL_POOL_SIZE: '3',
+    }, true);
+
+    assert.strictEqual(getLanguagePoolSize('python'), 4);
+    assert.strictEqual(getLanguagePoolSize('javascript'), 2);
+    assert.strictEqual(getLanguagePoolSize('postgresql'), 3);
+    assert.strictEqual(getLanguagePoolSize('c'), undefined);
+
+    // Invalid pool size throws naming the variable
+    assert.throws(() => {
+      initLanguageConfig({
+        LANGUAGE_PYTHON_POOL_SIZE: '0',
+      }, true);
+    }, /LANGUAGE_PYTHON_POOL_SIZE must be an integer >= 1/);
+
+    assert.throws(() => {
+      initLanguageConfig({
+        LANGUAGE_PYTHON_POOL_SIZE: '-2',
+      }, true);
+    }, /LANGUAGE_PYTHON_POOL_SIZE must be an integer >= 1/);
+
+    assert.throws(() => {
+      initLanguageConfig({
+        LANGUAGE_PYTHON_POOL_SIZE: 'abc',
+      }, true);
+    }, /LANGUAGE_PYTHON_POOL_SIZE must be an integer >= 1/);
+
+    // describeLanguagePlan reports the custom pool sizes
+    const plan = describeLanguagePlan();
+    const pythonPlan = plan.find(p => p.slug === 'python');
+    if (pythonPlan && pythonPlan.strategy === 'pooled') {
+      assert.strictEqual(pythonPlan.poolSize, 4);
+    }
+    const pgPlan = plan.find(p => p.slug === 'postgresql');
+    if (pgPlan && pgPlan.strategy === 'pooled') {
+      assert.strictEqual(pgPlan.poolSize, 3);
+    }
+
+    _resetLanguageConfig();
+    initLanguageConfig(process.env, true);
+  });
+
+  it('15. WarmContainerPool applies individual language pool sizes', async () => {
+    const mockDocker = createMockDocker();
+    const mockRedis = createMockRedis();
+
+    const pool = new WarmContainerPool(mockDocker, {
+      redis: mockRedis,
+      concurrency: 2,
+      languagePoolFlags: {
+        python: true,
+        c: true,
+        cpp: true,
+        postgresql: true,
+      },
+      languagePoolSizes: {
+        python: 5,
+        c: 3,
+        cpp: 4,
+        postgresql: 6,
+      },
+    });
+
+    // Python gets individual pool size 5
+    assert.strictEqual(pool.pools[5].targetPoolSize, 5);
+    // C and C++ share gcc:9 image, group size is Math.max(3, 4) = 4
+    assert.strictEqual(pool.pools[1].targetPoolSize, 4);
+    assert.strictEqual(pool.pools[2].targetPoolSize, 4);
+    // PostgreSQL gets 6
+    assert.strictEqual(pool.pools[8].targetPoolSize, 6);
+
+    // updateOptions updates targetPoolSize dynamically
+    pool.updateOptions({
+      languagePoolSizes: {
+        python: 7,
+      },
+    });
+    assert.strictEqual(pool.pools[5].targetPoolSize, 7);
+
+    await pool.shutdown();
   });
 });

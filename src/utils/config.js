@@ -3,6 +3,7 @@ import {
   isLanguageEnabled,
   getEnabledLanguages,
   getLanguagePoolFlag,
+  getLanguagePoolSize,
   describeLanguagePlan,
 } from '../languages/index.js';
 
@@ -90,7 +91,6 @@ const config = {
     host: process.env.DOCKER_HOST,
     runtime: process.env.DOCKER_RUNTIME,
     containerTimeout: parseInt(process.env.CONTAINER_TIMEOUT) || 30000,
-    languagePoolEnabled: process.env.ENABLE_LANGUAGE_POOL === 'true',
     maxConcurrentBoots: parseInt(process.env.WARM_POOL_MAX_CONCURRENT_BOOTS) || 3,
   },
 
@@ -103,6 +103,7 @@ export {
   isLanguageEnabled,
   getEnabledLanguages,
   getLanguagePoolFlag,
+  getLanguagePoolSize,
   describeLanguagePlan,
 };
 
